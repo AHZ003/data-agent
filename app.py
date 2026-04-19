@@ -641,10 +641,10 @@ else:
     # Render chat history
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
-            with st.chat_message("user", avatar="🧑"):
+            with st.chat_message("user"):
                 st.markdown(msg["content"])
         else:
-            with st.chat_message("assistant", avatar="✦"):
+            with st.chat_message("assistant"):
                 question = msg.get("question", "")
                 if question:
                     st.markdown(
