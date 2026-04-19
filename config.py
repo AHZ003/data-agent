@@ -10,7 +10,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # --- Model Configuration ---
 # Override via DATAAGENT_MODEL env var for cross-model eval comparisons.
-MODEL_NAME = os.getenv("DATAAGENT_MODEL", "gemini-flash-latest")
+MODEL_NAME = os.getenv("DATAAGENT_MODEL", "gemini-2.5-flash")
 MAX_TOKENS = 4096
 TEMPERATURE = 0.0
 

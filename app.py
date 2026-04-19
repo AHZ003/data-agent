@@ -793,10 +793,20 @@ else:
             st.session_state.stream_target = None
         except Exception as e:
             log.exception("Analysis failed")
+            err_str = str(e)
+            if any(p in err_str for p in ("429", "RESOURCE_EXHAUSTED", "quota", "rate limit")):
+                user_error = (
+                    "The AI service quota has been exceeded. The free tier allows "
+                    "a limited number of requests per minute/day. Please wait a "
+                    "moment and try again, or upgrade your Gemini API plan."
+                )
+            else:
+                user_error = f"The agent crew hit an error. Try rephrasing your question."
+            log.error("User-facing error: %s | Raw: %s", user_error, err_str[:300])
             st.session_state.messages.append({
                 "role": "assistant",
                 "question": prompt,
-                "error": f"The agent crew hit an error. Try rephrasing — details: {e}",
+                "error": user_error,
             })
         st.rerun()
 
