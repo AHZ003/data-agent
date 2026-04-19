@@ -106,7 +106,7 @@ Not "sample size small, be careful" — actual Tukey fences for outlier detectio
 ### Local
 
 ```bash
-git clone https://github.com/andyzhang003/data-agent.git
+git clone https://github.com/AHZ003/data-agent.git
 cd data-agent
 
 python -m venv .venv && source .venv/bin/activate
