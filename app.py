@@ -713,27 +713,49 @@ else:
             if result is None:
                 raise RuntimeError("Agent pipeline returned no result")
 
-            # Real Gemini streaming for the narrative — token-by-token
-            # output in the chat UI. The graph's storyteller_node was
-            # skipped above (skip_storyteller=True) so we're not paying
-            # 2× LLM cost for the same text.
             result_df = result.get("result_df")
-            result_summary = result_df.head(20).to_string() if result_df is not None else ""
             validation = result.get("validation") or {}
+            val_status = validation.get("status", "validated")
+            has_data = result_df is not None and len(result_df) > 0
+
             with st.chat_message("assistant"):
                 result_header(prompt)
-                st.markdown('<div class="da-result-narrative" style="margin-top:0;">', unsafe_allow_html=True)
-                narrative = st.write_stream(
-                    storyteller_agent.stream_narrative(
-                        question=contextual_q,
-                        sql_query=result.get("sql_query", "") or "",
-                        result_summary=result_summary,
-                        chart_description=(result.get("chart_config") or {}).get("chart_type", ""),
-                        validation_warnings=validation.get("warnings", []),
-                        prediction_info=result.get("prediction"),
+
+                if not has_data or val_status == "rejected":
+                    # Don't stream a narrative when there's no data or the
+                    # critic rejected — the LLM would hallucinate from
+                    # the question alone, producing a confident-sounding
+                    # answer backed by nothing.
+                    error_msg = result.get("error") or ""
+                    if "QuotaExhausted" in error_msg:
+                        narrative = "The AI service quota has been exceeded. Please try again later."
+                    elif not has_data:
+                        narrative = (
+                            "The query returned no results. This may mean the "
+                            "filters are too restrictive, or the question doesn't "
+                            "match the available data. Try rephrasing."
+                        )
+                    else:
+                        narrative = (
+                            "The analysis was flagged as unreliable by the "
+                            "validation agent (confidence too low). The results "
+                            "may be inaccurate — consider rephrasing the question."
+                        )
+                    st.warning(narrative)
+                else:
+                    result_summary = result_df.head(20).to_string()
+                    st.markdown('<div class="da-result-narrative" style="margin-top:0;">', unsafe_allow_html=True)
+                    narrative = st.write_stream(
+                        storyteller_agent.stream_narrative(
+                            question=contextual_q,
+                            sql_query=result.get("sql_query", "") or "",
+                            result_summary=result_summary,
+                            chart_description=(result.get("chart_config") or {}).get("chart_type", ""),
+                            validation_warnings=validation.get("warnings", []),
+                            prediction_info=result.get("prediction"),
+                        )
                     )
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
             analysis = {
                 "question": prompt,
