@@ -1,0 +1,145 @@
+name: Nightly eval
+
+# Run the full DataAgent eval harness on a schedule so we catch
+# regressions introduced by:
+#   - Gemini model upgrades that silently shift SQL / narrative output
+#   - Prompt edits that look fine in review but flunk the golden set
+#   - Library upgrades (pandas, plotly, langgraph) that change downstream
+#     chart types or result types
+#
+# The gated `eval` job in ci.yml is rule-based-only (--no-judge) so it
+# can block merges without burning a lot of LLM budget. This workflow
+# is the slower, richer sibling: full suite + LLM judge + uploaded
+# report + commit of summary.json to the eval-history branch so we
+# have a longitudinal view of agent quality.
+#
+# Triggered at 07:00 UTC daily (~ 2am Central) and manually via
+# workflow_dispatch from the Actions tab.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Override DATAAGENT_MODEL (blank = default)"
+        required: false
+        default: ""
+      compare:
+        description: "Cross-model comparison, comma-separated (optional)"
+        required: false
+        default: ""
+
+concurrency:
+  group: nightly-eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    name: Full eval (judge on)
+    runs-on: ubuntu-latest
+    # Guard against unsecured forks — the eval burns the production
+    # GOOGLE_API_KEY secret, so we only allow it to run when the
+    # repo owner is the invoker (or on schedule, which is always
+    # the main branch).
+    if: github.repository_owner == github.actor || github.event_name == 'schedule'
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Detect API key
+        id: key
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          if [ -z "$GOOGLE_API_KEY" ]; then
+            echo "No GOOGLE_API_KEY configured; skipping eval." >&2
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run full eval (judge on)
+        if: steps.key.outputs.present == 'true' && github.event.inputs.compare == ''
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          DATAAGENT_MODEL: ${{ github.event.inputs.model }}
+        run: |
+          python -m benchmarks.runner \
+            --out outputs/eval/nightly \
+            --fail-under 0.70
+
+      - name: Run cross-model comparison
+        if: steps.key.outputs.present == 'true' && github.event.inputs.compare != ''
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          python -m benchmarks.runner \
+            --compare "${{ github.event.inputs.compare }}" \
+            --out outputs/eval/nightly \
+            --no-judge
+
+      - name: Print summary
+        if: always() && steps.key.outputs.present == 'true'
+        run: |
+          if [ -f outputs/eval/nightly/summary.json ]; then
+            echo "### Nightly eval summary" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat outputs/eval/nightly/summary.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f outputs/eval/nightly/comparison.md ]; then
+            echo "### Cross-model comparison" >> "$GITHUB_STEP_SUMMARY"
+            cat outputs/eval/nightly/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload eval report
+        if: always() && steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-${{ github.run_id }}
+          path: outputs/eval/nightly/
+          retention-days: 30
+
+      - name: Upload trace file
+        if: always() && steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-trace-${{ github.run_id }}
+          path: outputs/traces/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Append to eval-history branch
+        # Keeps a JSON-per-night trail on an orphan branch so we have
+        # a longitudinal record of agent quality without cluttering
+        # main. Skipped on manual runs to avoid churn.
+        if: |
+          steps.key.outputs.present == 'true' &&
+          github.event_name == 'schedule' &&
+          github.event.inputs.compare == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TS=$(date -u +"%Y-%m-%dT%H-%M-%S")
+          git config user.name "dataagent-nightly-bot"
+          git config user.email "nightly@dataagent.local"
+          git fetch origin eval-history:eval-history || true
+          git checkout eval-history 2>/dev/null || git checkout --orphan eval-history
+          git rm -rf . 2>/dev/null || true
+          mkdir -p history
+          cp outputs/eval/nightly/summary.json "history/${TS}.json"
+          git add "history/${TS}.json"
+          git commit -m "nightly eval ${TS}" || echo "no changes to commit"
+          git push origin eval-history || echo "push failed (branch protected?)"

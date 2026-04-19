@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+outputs/*
+!outputs/.gitkeep
+db_data/*
+!db_data/.gitkeep
+.DS_Store
+*.egg-info/
+dist/
+build/
+.streamlit/secrets.toml
+benchmarks/spider/
