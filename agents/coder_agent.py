@@ -50,11 +50,13 @@ Write the SQL query:"""
 def _extract_sql(response_text: str) -> str:
     """Extract SQL query from LLM response."""
     # Try to extract from code block
-    match = re.search(r"```(?:sql)?\s*(.*?)```", response_text, re.DOTALL)
+    match = re.search(r"```(?:sqlite|sql)?\s*(.*?)```", response_text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
-    # Otherwise use the full response, cleaning it up
+    # Fallback: strip any leading/trailing backtick fence (handles unclosed fences)
     cleaned = response_text.strip()
+    cleaned = re.sub(r"^`{3,}(?:sqlite|sql)?\s*\n?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n?`{3,}\s*$", "", cleaned)
     # Remove any non-SQL preamble
     for prefix in ["Here is", "The SQL", "SQL:", "Query:"]:
         if cleaned.lower().startswith(prefix.lower()):
