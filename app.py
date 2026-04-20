@@ -344,8 +344,6 @@ if SHARED_ANALYSIS_ID:
     ds = store.load_dataset(shared["dataset_id"])
     ds_name = ds["name"].replace("_", " ").title() if ds else "Analysis"
 
-    if not EMBED_MODE:
-        topbar()
     st.markdown(
         f"""
         <div class="da-workspace-head">
@@ -393,8 +391,6 @@ if st.session_state.schema is not None and _QP_VIEW != "chat":
 # =====================================================================
 
 if st.session_state.schema is None:
-    topbar()
-
     hero(
         title="Ask your data anything.",
         subtitle="Upload a spreadsheet and DataAgent's multi-agent system will profile, "
@@ -512,9 +508,6 @@ if st.session_state.schema is None:
 
 else:
     schema = st.session_state.schema
-
-    # --- Top bar with navigation ---
-    topbar()
 
     nav_l, nav_c, nav_r = st.columns([1, 4, 1])
     if nav_l.button("Back", key="nav_back", use_container_width=True):
