@@ -108,15 +108,40 @@ def _generate_sql(question: str, schema: SemanticSchema, error_context: str = ""
     return _extract_sql(response.text)
 
 
+def _pandas_correlation(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+    """Compute pairwise correlations using pandas — reliable fallback for SQLite."""
+    if df is None:
+        return None
+    numeric = df.select_dtypes(include="number")
+    if numeric.shape[1] < 2:
+        return None
+    corr = numeric.corr().round(4)
+    # Reshape into a readable table: col_a, col_b, correlation
+    rows = []
+    cols = list(corr.columns)
+    for i, a in enumerate(cols):
+        for b in cols[i + 1 :]:
+            rows.append({"Column_A": a, "Column_B": b, "Correlation": corr.loc[a, b]})
+    return pd.DataFrame(rows).sort_values("Correlation", key=abs, ascending=False)
+
+
+_CORRELATION_KEYWORDS = re.compile(
+    r"\bcorrelat|pearson|r[\s-]?value|relationship between.*numeric",
+    re.IGNORECASE,
+)
+
+
 def execute_analysis(
     question: str,
     schema: SemanticSchema,
     db: Database,
+    source_df: Optional[pd.DataFrame] = None,
 ) -> Tuple[Optional[pd.DataFrame], CodeResult]:
     """
     Generate SQL from a question, execute it, and return results.
 
     Implements self-correction: if the query fails, retries up to MAX_RETRY_ATTEMPTS.
+    Falls back to pandas for correlation queries that SQLite can't handle.
     """
     last_error = ""
     last_sql = ""
@@ -145,9 +170,6 @@ def execute_analysis(
             return result_df, code_result
 
         except Exception as e:
-            # Quota / rate-limit errors are terminal. Retrying makes it
-            # worse and can wedge the orchestrator in an infinite loop
-            # (see docs/postmortems/2026-04-13_eval_findings.md).
             if _is_quota_error(e):
                 return None, CodeResult(
                     sql_query="",
@@ -156,8 +178,17 @@ def execute_analysis(
                 )
             last_error = str(e)
 
-    # All retries exhausted — preserve the last SQL we tried instead
-    # of overwriting it with the error string.
+    # SQL retries exhausted — try pandas fallback for correlation queries
+    if _CORRELATION_KEYWORDS.search(question) and source_df is not None:
+        corr_df = _pandas_correlation(source_df)
+        if corr_df is not None and len(corr_df) > 0:
+            return corr_df, CodeResult(
+                sql_query="-- Computed via pandas df.corr() (SQLite lacks CORR())",
+                success=True,
+                row_count=len(corr_df),
+                columns=list(corr_df.columns),
+            )
+
     return None, CodeResult(
         sql_query=last_sql,
         success=False,
