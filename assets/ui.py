@@ -39,52 +39,42 @@ def inject_theme():
     css_path = Path(__file__).parent / "styles.css"
     if css_path.exists():
         st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
-    # Force sidebar open via JS — Streamlit Cloud sometimes ignores initial_sidebar_state
-    import streamlit.components.v1 as components
-    components.html(
-        """
-        <script>
-        (function() {
-            var parent = window.parent.document;
-            var sidebar = parent.querySelector('section[data-testid="stSidebar"]');
-            if (sidebar && sidebar.getAttribute('aria-expanded') === 'false') {
-                var btn = parent.querySelector('[data-testid="collapsedControl"]')
-                         || parent.querySelector('[data-testid="stSidebarCollapsedControl"]')
-                         || parent.querySelector('button[kind="header"]');
-                if (btn) { setTimeout(function(){ btn.click(); }, 500); }
-            }
-        })();
-        </script>
-        """,
-        height=0,
-    )
 
 
-def brand():
-    """Render the sidebar brand block."""
+def topbar():
+    """Render a slim brand bar at the top of every page."""
     st.markdown(
         f"""
-        <div class="da-brand">
-            <span class="da-brand-mark">{icon("sparkles", 16, "#fff")}</span>
-            <span class="da-brand-name">DataAgent</span>
-        </div>
-        <div style="color:var(--text-mute);font-size:0.75rem;margin-bottom:1rem;">
-            AI-native analytics workspace
+        <div class="da-topbar">
+            <div class="da-topbar-brand">
+                <span class="da-topbar-mark">{icon("sparkles", 16, "#fff")}</span>
+                <span class="da-topbar-name">DataAgent</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
+def brand():
+    """Render the brand block (alias kept for backwards compat)."""
+    topbar()
+
+
+def section_label(text: str):
+    st.markdown(f'<div class="da-section-label">{text}</div>', unsafe_allow_html=True)
+
+
 def sidebar_label(text: str):
-    st.markdown(f'<div class="da-sidebar-label">{text}</div>', unsafe_allow_html=True)
+    """Alias for section_label (backwards compat)."""
+    section_label(text)
 
 
 def hero(title: str, subtitle: str, eyebrow: str = "AI Data Analyst"):
     st.markdown(
         f"""
         <div class="da-hero">
-            <div class="da-hero-eyebrow">{icon("bolt", 12, "#B8A5FF")} {eyebrow}</div>
+            <div class="da-hero-eyebrow">{icon("bolt", 12)} {eyebrow}</div>
             <h1 class="da-hero-title">{title}</h1>
             <p class="da-hero-sub">{subtitle}</p>
         </div>
