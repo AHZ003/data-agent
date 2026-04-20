@@ -49,7 +49,10 @@ Write the SQL query:"""
 
 _UNSUPPORTED_FUNCS = re.compile(
     r"\b(CORR|STDDEV|STDDEV_POP|STDDEV_SAMP|VARIANCE|VAR_POP|VAR_SAMP"
-    r"|PERCENTILE_CONT|PERCENTILE_DISC|MEDIAN|STDEV)\s*\(",
+    r"|PERCENTILE_CONT|PERCENTILE_DISC|MEDIAN|STDEV"
+    r"|REGEXP_LIKE|REGEXP_REPLACE|REGEXP_SUBSTR"
+    r"|STRING_AGG|ARRAY_AGG|LISTAGG"
+    r"|COVAR_POP|COVAR_SAMP|REGR_SLOPE|REGR_INTERCEPT)\s*\(",
     re.IGNORECASE,
 )
 
@@ -126,7 +129,8 @@ def _pandas_correlation(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
 
 
 _CORRELATION_KEYWORDS = re.compile(
-    r"\bcorrelat|pearson|r[\s-]?value|relationship between.*numeric",
+    r"\bcorrelat|\bpearson|\br[\s-]?value\b|relationship between.*numeric"
+    r"|\bcovariance\b|\bspearman\b|\bassociation\b.*\bnumeric",
     re.IGNORECASE,
 )
 

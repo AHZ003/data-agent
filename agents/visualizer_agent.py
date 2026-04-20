@@ -13,6 +13,9 @@ _register_plotly_theme()
 
 def _classify_chart_type(df: pd.DataFrame, question: str) -> ChartConfig:
     """Determine the best chart type based on data shape and question."""
+    if df is None or len(df) == 0:
+        return ChartConfig(chart_type=ChartType.TABLE, title=question)
+
     question_lower = question.lower()
     cols = df.columns.tolist()
     num_cols = df.select_dtypes(include="number").columns.tolist()
@@ -37,6 +40,9 @@ def _classify_chart_type(df: pd.DataFrame, question: str) -> ChartConfig:
         )
 
     # Keywords override
+    if not num_cols and not cat_cols and not date_cols:
+        return ChartConfig(chart_type=ChartType.TABLE, title=question)
+
     if any(w in question_lower for w in ["distribution", "histogram"]):
         col = num_cols[0] if num_cols else cols[0]
         return ChartConfig(
@@ -129,6 +135,8 @@ def generate_chart(
     template = config.template
 
     if config.chart_type == ChartType.KPI_CARD:
+        if len(df) == 0:
+            return None
         value = df[config.y_column].iloc[0] if config.y_column else df.iloc[0, 0]
         fig = go.Figure(
             go.Indicator(mode="number", value=float(value), title={"text": config.title})
