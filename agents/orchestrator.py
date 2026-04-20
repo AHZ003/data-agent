@@ -94,7 +94,7 @@ def coder_node(state: AgentState) -> AgentState:
 
     with tracing.span("coder", model=MODEL_NAME) as _t:
         result_df, code_result = coder_agent.execute_analysis(
-            state["question"], schema, db
+            state["question"], schema, db, source_df=state.get("df"),
         )
         _t.add_metadata(
             sql=(code_result.sql_query or "")[:300],
