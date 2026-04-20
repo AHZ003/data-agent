@@ -247,10 +247,22 @@ section[data-testid="stSidebar"] [data-testid="stSpinner"] {
 /* Selection */
 ::selection { background: rgba(124,92,255,0.35); color: #fff; }
 
-/* Hide Streamlit chrome */
-#MainMenu, footer, header[data-testid="stHeader"] {
+/* Hide Streamlit chrome — keep header so sidebar toggle stays visible */
+#MainMenu, footer {
   visibility: hidden;
   height: 0;
+}
+header[data-testid="stHeader"] {
+  background: transparent !important;
+  border: none !important;
+}
+/* Make sidebar toggle visible on dark background */
+[data-testid="collapsedControl"] {
+  color: var(--text) !important;
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  margin: 0.5rem !important;
 }
 .block-container {
   padding-top: 2.5rem !important;
