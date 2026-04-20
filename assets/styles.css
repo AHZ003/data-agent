@@ -109,23 +109,39 @@ html, body, [class*="css"], .stApp, .stMarkdown, button, input, textarea, select
   background: linear-gradient(90deg, var(--accent), var(--accent-light)) !important;
 }
 
-/* Hide Streamlit chrome + sidebar completely */
-#MainMenu, footer {
+/* Hide sidebar, keep Streamlit toolbar visible */
+footer {
   visibility: hidden !important;
   height: 0 !important;
 }
 header[data-testid="stHeader"] {
   background: var(--bg) !important;
-  border: none !important;
+  border-bottom: 1px solid var(--border) !important;
 }
 section[data-testid="stSidebar"],
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapsedControl"] {
   display: none !important;
 }
+/* Style the Streamlit toolbar buttons (share, star, github) */
+[data-testid="stToolbar"] {
+  right: 1rem !important;
+  top: 0.5rem !important;
+}
+[data-testid="stToolbar"] button {
+  color: var(--text-dim) !important;
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+[data-testid="stToolbar"] button:hover {
+  color: var(--accent) !important;
+  border-color: var(--accent-border) !important;
+  background: var(--accent-bg) !important;
+}
 
 .block-container {
-  padding-top: 1.5rem !important;
+  padding-top: 0.75rem !important;
   padding-bottom: 4rem !important;
   padding-left: 2rem !important;
   padding-right: 2rem !important;
@@ -398,7 +414,7 @@ hr {
 
 /* Hero */
 .da-hero {
-  padding: 2.5rem 0 1.5rem 0;
+  padding: 1.5rem 0 1.25rem 0;
   text-align: center;
   animation: daFadeUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
