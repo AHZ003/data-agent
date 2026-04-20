@@ -52,10 +52,12 @@ inject_theme()
 register_plotly_theme()
 store.init_db()
 
-# --- Query params (share + embed) ---
+# --- Query params (share + embed + navigation) ---
 _qp = st.query_params
 SHARED_ANALYSIS_ID = _qp.get("a")
 EMBED_MODE = _qp.get("embed") in ("1", "true")
+_QP_VIEW = _qp.get("view")  # "chat" when dataset is loaded
+_QP_DATASET = _qp.get("ds")
 
 if EMBED_MODE:
     st.markdown(
@@ -106,6 +108,11 @@ def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
     st.session_state.agent_log = []
     st.session_state.stream_target = None
 
+    # Push query param so the browser gets a new history entry.
+    # Clicking "Back" will return to ?view absent → landing page.
+    st.query_params["view"] = "chat"
+    st.query_params["ds"] = table_name
+
     if persist and st.session_state.workspace_id:
         try:
             dsid = store.save_dataset(
@@ -144,6 +151,9 @@ def rehydrate_dataset(dataset_id: str) -> bool:
 def clear_session():
     for k, v in _DEFAULTS.items():
         st.session_state[k] = v if not isinstance(v, list) else []
+    # Clear navigation query params
+    for p in ("view", "ds"):
+        st.query_params.pop(p, None)
 
 
 def contextualize(question: str, messages: list) -> str:
@@ -567,6 +577,13 @@ if uploaded_image is not None and st.session_state.df is None:
                 st.rerun()
 
 
+# --- Navigation: handle browser back button ---
+# If the user pressed Back, query params lose "view=chat" but session
+# state still has a loaded dataset. Clear session to show landing page.
+if st.session_state.schema is not None and _QP_VIEW != "chat":
+    clear_session()
+    st.rerun()
+
 # --- Main content ---
 
 if st.session_state.schema is None:
@@ -624,26 +641,54 @@ if st.session_state.schema is None:
                                   original_filename=os.path.basename(path))
                 st.rerun()
 
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
     st.markdown(
-        '<div style="color:var(--text-mute);font-size:0.82rem;margin-top:1rem;">'
-        'Or upload your own file from the sidebar.'
-        '</div>',
+        '<div class="da-sidebar-label" style="margin:0 0 0.5rem 0;">Or upload your own file</div>',
         unsafe_allow_html=True,
     )
+    landing_file = st.file_uploader(
+        "Upload CSV or Excel",
+        type=["csv", "xlsx", "xls"],
+        label_visibility="collapsed",
+        key="landing_upload",
+    )
+    if landing_file is not None:
+        try:
+            if landing_file.size > MAX_UPLOAD_BYTES:
+                st.error(f"File too large ({landing_file.size / 1024 / 1024:.1f} MB). Limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB.")
+            else:
+                _df = load_file(landing_file)
+                if len(_df) > MAX_ROWS_INGEST:
+                    st.warning(f"Dataset truncated to {MAX_ROWS_INGEST:,} rows.")
+                    _df = _df.head(MAX_ROWS_INGEST)
+                _tname = landing_file.name.rsplit(".", 1)[0].lower().replace(" ", "_")
+                with st.spinner("Profiling dataset…"):
+                    init_database(_df, _tname, original_filename=landing_file.name)
+                st.rerun()
+        except Exception as e:
+            st.error(f"Couldn't read that file — {e}")
 
 else:
     schema = st.session_state.schema
 
-    # Compact workspace header
-    st.markdown(
-        f"""
-        <div class="da-workspace-head">
-            <h1 class="da-workspace-title">{schema.table_name.replace("_", " ").title()}</h1>
-            <p class="da-workspace-sub">{schema.row_count:,} rows · {schema.column_count} columns</p>
-        </div>
-        """,
+    # Top navigation bar
+    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
+    if nav_l.button("< Back", key="nav_back", use_container_width=True):
+        clear_session()
+        st.rerun()
+    nav_c.markdown(
+        f'<div style="text-align:center;padding-top:0.3rem;">'
+        f'<span style="font-weight:600;color:var(--text);font-size:1rem;">'
+        f'{schema.table_name.replace("_", " ").title()}</span>'
+        f'<span style="color:var(--text-mute);font-size:0.85rem;margin-left:0.75rem;">'
+        f'{schema.row_count:,} rows · {schema.column_count} columns</span></div>',
         unsafe_allow_html=True,
     )
+    if nav_r.button("New chat", key="nav_new", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.analyses = []
+        st.session_state.agent_log = []
+        st.rerun()
 
     with st.expander("Dataset overview", expanded=False):
         render_profile(schema)
@@ -681,7 +726,7 @@ else:
 
     # Chat input
     pending = st.session_state.pop("_pending_q", None)
-    prompt = st.chat_input("Ask a follow-up question…")
+    prompt = st.chat_input("Ask a question about your data…")
     if pending and not prompt:
         prompt = pending
 
