@@ -249,20 +249,41 @@ section[data-testid="stSidebar"] [data-testid="stSpinner"] {
 
 /* Hide Streamlit chrome — keep header so sidebar toggle stays visible */
 #MainMenu, footer {
-  visibility: hidden;
-  height: 0;
+  visibility: hidden !important;
+  height: 0 !important;
 }
 header[data-testid="stHeader"] {
   background: transparent !important;
   border: none !important;
+  height: auto !important;
+  min-height: 0 !important;
 }
-/* Make sidebar toggle visible on dark background */
-[data-testid="collapsedControl"] {
-  color: var(--text) !important;
-  background: var(--panel) !important;
-  border: 1px solid var(--border) !important;
+/* Make sidebar toggle highly visible on dark background */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"] {
+  color: #fff !important;
+  background: var(--accent) !important;
+  border: none !important;
   border-radius: 8px !important;
-  margin: 0.5rem !important;
+  margin: 0.75rem !important;
+  z-index: 999999 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: flex !important;
+  width: 40px !important;
+  height: 40px !important;
+  box-shadow: 0 2px 12px rgba(124,92,255,0.4) !important;
+}
+[data-testid="collapsedControl"]:hover,
+[data-testid="stSidebarCollapsedControl"]:hover {
+  background: var(--accent-dim) !important;
+  transform: scale(1.05);
+}
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapsedControl"] svg {
+  color: #fff !important;
+  fill: #fff !important;
 }
 .block-container {
   padding-top: 2.5rem !important;

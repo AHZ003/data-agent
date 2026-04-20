@@ -39,6 +39,25 @@ def inject_theme():
     css_path = Path(__file__).parent / "styles.css"
     if css_path.exists():
         st.markdown(f"<style>{css_path.read_text()}</style>", unsafe_allow_html=True)
+    # Force sidebar open via JS — Streamlit Cloud sometimes ignores initial_sidebar_state
+    import streamlit.components.v1 as components
+    components.html(
+        """
+        <script>
+        (function() {
+            var parent = window.parent.document;
+            var sidebar = parent.querySelector('section[data-testid="stSidebar"]');
+            if (sidebar && sidebar.getAttribute('aria-expanded') === 'false') {
+                var btn = parent.querySelector('[data-testid="collapsedControl"]')
+                         || parent.querySelector('[data-testid="stSidebarCollapsedControl"]')
+                         || parent.querySelector('button[kind="header"]');
+                if (btn) { setTimeout(function(){ btn.click(); }, 500); }
+            }
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def brand():
