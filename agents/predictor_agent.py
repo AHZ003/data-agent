@@ -70,6 +70,8 @@ def forecast_time_series(
     # Compute confidence intervals (approximate)
     residuals = series - fitted
     std_resid = residuals.std()
+    if std_resid == 0 or pd.isna(std_resid):
+        std_resid = series.std() * 0.1 or 1.0
     ci_upper = forecast + 1.96 * std_resid
     ci_lower = forecast - 1.96 * std_resid
 
@@ -143,6 +145,8 @@ def cluster_data(
         raise ValueError("Need at least 2 numeric columns for clustering.")
 
     X = df[feature_cols].dropna()
+    if len(X) < 4:
+        raise ValueError(f"Need at least 4 rows for clustering, got {len(X)}.")
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -233,9 +237,13 @@ def detect_anomalies(
     anomaly_reasons = pd.Series("", index=df.index)
 
     for col in numeric_cols:
+        if df[col].dropna().empty:
+            continue
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
+        if IQR == 0:
+            continue
         lower = Q1 - threshold * IQR
         upper = Q3 + threshold * IQR
         col_mask = (df[col] < lower) | (df[col] > upper)
