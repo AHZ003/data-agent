@@ -47,6 +47,30 @@ USER QUESTION: {question}
 Write the SQL query:"""
 
 
+_UNSUPPORTED_FUNCS = re.compile(
+    r"\b(CORR|STDDEV|STDDEV_POP|STDDEV_SAMP|VARIANCE|VAR_POP|VAR_SAMP"
+    r"|PERCENTILE_CONT|PERCENTILE_DISC|MEDIAN|STDEV)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _check_unsupported_functions(sql: str) -> Optional[str]:
+    """Return an error hint if SQL uses functions SQLite doesn't have."""
+    m = _UNSUPPORTED_FUNCS.search(sql)
+    if not m:
+        return None
+    func = m.group(1).upper()
+    return (
+        f"SQLite ERROR: function {func}() does not exist. "
+        "You MUST compute this manually. For correlation use: "
+        "(SUM(x*y) - SUM(x)*SUM(y)/COUNT(*)) / "
+        "(SQRT((SUM(x*x) - SUM(x)*SUM(x)/COUNT(*)) * "
+        "(SUM(y*y) - SUM(y)*SUM(y)/COUNT(*)))). "
+        "For stddev use: SQRT(AVG(x*x) - AVG(x)*AVG(x)). "
+        "Do NOT use table aliases. Query directly from the table."
+    )
+
+
 def _extract_sql(response_text: str) -> str:
     """Extract SQL query from LLM response."""
     # Try to extract from code block
@@ -100,6 +124,12 @@ def execute_analysis(
         try:
             sql = _generate_sql(question, schema, error_context=last_error)
             last_sql = sql
+
+            unsupported = _check_unsupported_functions(sql)
+            if unsupported:
+                last_error = unsupported
+                continue
+
             result_df, error = db.execute_query(sql)
 
             if error:
