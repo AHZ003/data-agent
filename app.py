@@ -272,14 +272,17 @@ def _session_cost_summary() -> dict:
 
 def render_assistant_body(analysis: dict, should_stream: bool):
     """Render chart + narrative + chips + expanders inside an assistant message."""
+    validation = analysis.get("validation") or {}
+    conf = validation.get("confidence")
+
+    # --- Narrative ---
     if analysis.get("narrative"):
         if should_stream:
-            st.markdown('<div class="da-result-narrative" style="margin-top:0;">', unsafe_allow_html=True)
             st.write_stream(type_stream(analysis["narrative"], words_per_chunk=2, delay=0.025))
-            st.markdown("</div>", unsafe_allow_html=True)
         else:
-            narrative_block(analysis["narrative"])
+            st.markdown(analysis["narrative"])
 
+    # --- Chart ---
     if analysis.get("chart") is not None:
         st.plotly_chart(analysis["chart"], use_container_width=True, config={"displayModeBar": False})
 
@@ -289,55 +292,59 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     if analysis.get("prediction") and "explanation" in (analysis.get("prediction") or {}):
         st.info(analysis["prediction"]["explanation"])
 
-    validation = analysis.get("validation") or {}
-    chips_html = []
-    if validation.get("confidence") is not None:
-        conf = validation["confidence"]
-        kind = "ok" if conf >= 70 else ("warn" if conf >= 40 else "err")
-        chips_html.append(chip(f"Confidence {conf}%", kind))
-    if analysis.get("sql_query"):
-        chips_html.append(chip("SQL"))
-    if analysis.get("result_df") is not None:
-        chips_html.append(chip(f"{len(analysis['result_df'])} rows"))
-    if chips_html:
-        st.markdown(
-            f'<div style="display:flex;gap:0.4rem;margin-top:0.75rem;">{"".join(chips_html)}</div>',
-            unsafe_allow_html=True,
-        )
-
+    # --- Warnings ---
     if validation.get("warnings"):
         for w in validation["warnings"]:
             st.warning(w)
 
-    col_sql, col_data = st.columns(2)
-    if analysis.get("sql_query"):
-        with col_sql.expander("SQL query"):
-            st.code(analysis["sql_query"], language="sql")
-    if analysis.get("result_df") is not None and len(analysis["result_df"]) > 0:
-        with col_data.expander("Result data"):
-            st.dataframe(analysis["result_df"], use_container_width=True, height=260)
-
-    if analysis.get("run_id"):
-        with st.expander("🔎 Trace & cost"):
-            _render_trace_panel(analysis["run_id"])
-
-    aid = analysis.get("id")
-    if aid:
-        share_url = f"?a={aid}"
-        embed_url = f"?a={aid}&embed=1"
-        st.markdown(
-            f"""
-            <div style="display:flex;gap:0.75rem;margin-top:0.75rem;font-size:0.72rem;">
-                <a href="{share_url}" target="_blank"
-                   style="color:var(--text-mute);text-decoration:none;border:1px solid var(--border-strong);
-                   padding:0.25rem 0.6rem;border-radius:999px;">↗ Share link</a>
-                <a href="{embed_url}" target="_blank"
-                   style="color:var(--text-mute);text-decoration:none;border:1px solid var(--border-strong);
-                   padding:0.25rem 0.6rem;border-radius:999px;">⌗ Embed view</a>
-            </div>
-            """,
+    # --- Metadata bar ---
+    meta_cols = st.columns([1, 1, 1, 2])
+    if conf is not None:
+        kind = "ok" if conf >= 70 else ("warn" if conf >= 40 else "err")
+        colors = {"ok": "#34D399", "warn": "#F59E0B", "err": "#F87171"}
+        meta_cols[0].markdown(
+            f'<div style="font-size:0.75rem;color:var(--text-mute);">Confidence</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:{colors[kind]};">{conf}%</div>',
             unsafe_allow_html=True,
         )
+    if analysis.get("result_df") is not None:
+        n_rows = len(analysis["result_df"])
+        meta_cols[1].markdown(
+            f'<div style="font-size:0.75rem;color:var(--text-mute);">Rows</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:var(--text);">{n_rows:,}</div>',
+            unsafe_allow_html=True,
+        )
+    if analysis.get("sql_query"):
+        sql_label = "pandas" if analysis["sql_query"].startswith("--") else "SQL"
+        meta_cols[2].markdown(
+            f'<div style="font-size:0.75rem;color:var(--text-mute);">Method</div>'
+            f'<div style="font-size:1.1rem;font-weight:600;color:var(--text);">{sql_label}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # --- Expandable details ---
+    with st.expander("View details", expanded=False):
+        tab_names = []
+        if analysis.get("result_df") is not None and len(analysis["result_df"]) > 0:
+            tab_names.append("Data")
+        if analysis.get("sql_query"):
+            tab_names.append("Query")
+        if analysis.get("run_id"):
+            tab_names.append("Trace")
+        if tab_names:
+            tabs = st.tabs(tab_names)
+            tab_idx = 0
+            if "Data" in tab_names:
+                with tabs[tab_idx]:
+                    st.dataframe(analysis["result_df"], use_container_width=True, height=300)
+                tab_idx += 1
+            if "Query" in tab_names:
+                with tabs[tab_idx]:
+                    st.code(analysis["sql_query"], language="sql")
+                tab_idx += 1
+            if "Trace" in tab_names:
+                with tabs[tab_idx]:
+                    _render_trace_panel(analysis["run_id"])
 
 
 # --- Shared analysis view (single-page render via ?a=<id>) ---
@@ -610,20 +617,16 @@ else:
     st.markdown(
         f"""
         <div class="da-workspace-head">
-            <div class="da-hero-eyebrow">{icon("bolt", 12, "#B8A5FF")} Active workspace</div>
             <h1 class="da-workspace-title">{schema.table_name.replace("_", " ").title()}</h1>
-            <p class="da-workspace-sub">{schema.row_count:,} rows · {schema.column_count} columns · Ask anything below.</p>
+            <p class="da-workspace-sub">{schema.row_count:,} rows · {schema.column_count} columns</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    render_profile(schema)
-
-    with st.expander("Data preview", expanded=False):
+    with st.expander("Dataset overview", expanded=False):
+        render_profile(schema)
         st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), use_container_width=True)
-
-    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
     # Starter suggestions (only when the chat is empty)
     if not st.session_state.messages and schema.suggested_questions:
@@ -645,13 +648,6 @@ else:
                 st.markdown(msg["content"])
         else:
             with st.chat_message("assistant"):
-                question = msg.get("question", "")
-                if question:
-                    st.markdown(
-                        f'<div class="da-result-q">ANSWER TO</div>'
-                        f'<div class="da-result-title">{question}</div>',
-                        unsafe_allow_html=True,
-                    )
                 if msg.get("error"):
                     st.error(msg["error"])
                 elif msg.get("analysis"):
@@ -719,8 +715,6 @@ else:
             has_data = result_df is not None and len(result_df) > 0
 
             with st.chat_message("assistant"):
-                result_header(prompt)
-
                 if not has_data or val_status == "rejected":
                     # Don't stream a narrative when there's no data or the
                     # critic rejected — the LLM would hallucinate from
@@ -744,7 +738,6 @@ else:
                     st.warning(narrative)
                 else:
                     result_summary = result_df.head(20).to_string()
-                    st.markdown('<div class="da-result-narrative" style="margin-top:0;">', unsafe_allow_html=True)
                     narrative = st.write_stream(
                         storyteller_agent.stream_narrative(
                             question=contextual_q,
@@ -755,7 +748,12 @@ else:
                             prediction_info=result.get("prediction"),
                         )
                     )
-                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # Show chart inline on first render
+                if result.get("chart") is not None:
+                    st.plotly_chart(result["chart"], use_container_width=True, config={"displayModeBar": False})
+                if result.get("prediction_chart") is not None:
+                    st.plotly_chart(result["prediction_chart"], use_container_width=True, config={"displayModeBar": False})
 
             analysis = {
                 "question": prompt,
