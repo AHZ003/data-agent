@@ -19,7 +19,7 @@ from agents.storyteller_agent import generate_full_report, report_to_markdown
 from agents.orchestrator import run_analysis, run_analysis_stream
 from models.analysis_plan import SemanticSchema, ColumnRole
 from assets.ui import (
-    inject_theme, brand, sidebar_label, hero, feature_card,
+    inject_theme, topbar, section_label, hero, feature_card,
     result_header, narrative_block, chip, icon,
 )
 from assets.plotly_theme import register as register_plotly_theme
@@ -44,27 +44,20 @@ log = logging.getLogger("dataagent")
 st.set_page_config(
     page_title="DataAgent — AI Data Analyst",
     page_icon="✦",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 inject_theme()
 register_plotly_theme()
 store.init_db()
 
-# --- Query params (share + embed + navigation) ---
+# --- Query params ---
 _qp = st.query_params
 SHARED_ANALYSIS_ID = _qp.get("a")
 EMBED_MODE = _qp.get("embed") in ("1", "true")
-_QP_VIEW = _qp.get("view")  # "chat" when dataset is loaded
+_QP_VIEW = _qp.get("view")
 _QP_DATASET = _qp.get("ds")
-
-if EMBED_MODE:
-    st.markdown(
-        "<style>section[data-testid='stSidebar'], [data-testid='collapsedControl']{display:none!important;}"
-        ".block-container{max-width:100%!important;padding:1rem 1.5rem!important;}</style>",
-        unsafe_allow_html=True,
-    )
 
 if not GOOGLE_API_KEY:
     st.error(
@@ -87,7 +80,6 @@ for k, v in _DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Ensure a default workspace exists and is selected
 if st.session_state.workspace_id is None:
     _ws = store.ensure_default_workspace()
     st.session_state.workspace_id = _ws.id
@@ -108,8 +100,6 @@ def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
     st.session_state.agent_log = []
     st.session_state.stream_target = None
 
-    # Push query param so the browser gets a new history entry.
-    # Clicking "Back" will return to ?view absent → landing page.
     st.query_params["view"] = "chat"
     st.query_params["ds"] = table_name
 
@@ -128,7 +118,6 @@ def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
 
 
 def rehydrate_dataset(dataset_id: str) -> bool:
-    """Load a persisted dataset back into session state."""
     data = store.load_dataset(dataset_id)
     if not data:
         return False
@@ -151,13 +140,11 @@ def rehydrate_dataset(dataset_id: str) -> bool:
 def clear_session():
     for k, v in _DEFAULTS.items():
         st.session_state[k] = v if not isinstance(v, list) else []
-    # Clear navigation query params
     for p in ("view", "ds"):
         st.query_params.pop(p, None)
 
 
 def contextualize(question: str, messages: list) -> str:
-    """Prepend recent conversation context so the agent crew handles follow-ups."""
     prior_qs = [m["content"] for m in messages if m["role"] == "user"][-3:]
     if not prior_qs:
         return question
@@ -204,14 +191,6 @@ def render_profile(schema: SemanticSchema):
 
 
 def _render_trace_panel(run_id: str):
-    """Inline expander showing the structured-trace spans for one run.
-
-    Uses `core.tracing.read_spans(run_id=...)` — the same JSONL file the
-    eval harness writes to — so the user can see exactly which agent
-    spent how much time, how many tokens, and how many $ this question
-    just cost. This is the minimum-viable observability UX that turns
-    "did the agent work?" into "what did the agent do?".
-    """
     try:
         spans = tracing.read_spans(run_id=run_id)
         summary = tracing.run_summary(run_id)
@@ -248,9 +227,6 @@ def _render_trace_panel(run_id: str):
 
 
 def _session_cost_summary() -> dict:
-    """Sum duration + cost across every analysis in this session that
-    has a run_id. Used by the sidebar `Session cost` card.
-    """
     total_ms = 0.0
     total_in = 0
     total_out = 0
@@ -285,14 +261,14 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     validation = analysis.get("validation") or {}
     conf = validation.get("confidence")
 
-    # --- Narrative ---
+    # Narrative
     if analysis.get("narrative"):
         if should_stream:
             st.write_stream(type_stream(analysis["narrative"], words_per_chunk=2, delay=0.025))
         else:
             st.markdown(analysis["narrative"])
 
-    # --- Chart ---
+    # Chart
     if analysis.get("chart") is not None:
         st.plotly_chart(analysis["chart"], use_container_width=True, config={"displayModeBar": False})
 
@@ -302,16 +278,16 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     if analysis.get("prediction") and "explanation" in (analysis.get("prediction") or {}):
         st.info(analysis["prediction"]["explanation"])
 
-    # --- Warnings ---
+    # Warnings
     if validation.get("warnings"):
         for w in validation["warnings"]:
             st.warning(w)
 
-    # --- Metadata bar ---
+    # Metadata bar
     meta_cols = st.columns([1, 1, 1, 2])
     if conf is not None:
         kind = "ok" if conf >= 70 else ("warn" if conf >= 40 else "err")
-        colors = {"ok": "#34D399", "warn": "#F59E0B", "err": "#F87171"}
+        colors = {"ok": "#00B894", "warn": "#E17055", "err": "#D63031"}
         meta_cols[0].markdown(
             f'<div style="font-size:0.75rem;color:var(--text-mute);">Confidence</div>'
             f'<div style="font-size:1.1rem;font-weight:600;color:{colors[kind]};">{conf}%</div>',
@@ -332,7 +308,7 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             unsafe_allow_html=True,
         )
 
-    # --- Expandable details ---
+    # Expandable details
     with st.expander("View details", expanded=False):
         tab_names = []
         if analysis.get("result_df") is not None and len(analysis["result_df"]) > 0:
@@ -357,7 +333,7 @@ def render_assistant_body(analysis: dict, should_stream: bool):
                     _render_trace_panel(analysis["run_id"])
 
 
-# --- Shared analysis view (single-page render via ?a=<id>) ---
+# --- Shared analysis view ---
 
 if SHARED_ANALYSIS_ID:
     shared = store.load_analysis(SHARED_ANALYSIS_ID)
@@ -369,11 +345,11 @@ if SHARED_ANALYSIS_ID:
     ds_name = ds["name"].replace("_", " ").title() if ds else "Analysis"
 
     if not EMBED_MODE:
-        brand()
+        topbar()
     st.markdown(
         f"""
         <div class="da-workspace-head">
-            <div class="da-hero-eyebrow">{icon("bolt", 12, "#B8A5FF")} Shared analysis</div>
+            <div class="da-hero-eyebrow">{icon("bolt", 12)} Shared analysis</div>
             <h1 class="da-workspace-title">{ds_name}</h1>
             <p class="da-workspace-sub">{shared['question']}</p>
         </div>
@@ -385,224 +361,54 @@ if SHARED_ANALYSIS_ID:
     st.stop()
 
 
-# --- Sidebar ---
+# --- File/image ingestion helpers ---
 
-with st.sidebar:
-    brand()
-
-    # --- Workspaces ---
-    sidebar_label("Workspace")
-    _workspaces = store.list_workspaces()
-    _ws_names = [w.name for w in _workspaces]
-    _current_idx = next(
-        (i for i, w in enumerate(_workspaces) if w.id == st.session_state.workspace_id),
-        0,
-    )
-    _selected = st.selectbox(
-        "workspace",
-        _ws_names,
-        index=_current_idx if _ws_names else 0,
-        label_visibility="collapsed",
-        key="ws_select",
-    )
-    if _selected and _workspaces:
-        _new_id = next(w.id for w in _workspaces if w.name == _selected)
-        if _new_id != st.session_state.workspace_id:
-            st.session_state.workspace_id = _new_id
-            clear_session()
-            st.session_state.workspace_id = _new_id
-            st.rerun()
-
-    with st.popover("＋  New workspace", use_container_width=True):
-        _new_name = st.text_input("Name", key="new_ws_name", label_visibility="collapsed",
-                                   placeholder="Q2 Revenue Review")
-        if st.button("Create", key="create_ws", use_container_width=True, type="primary"):
-            if _new_name.strip():
-                ws = store.create_workspace(_new_name.strip())
-                st.session_state.workspace_id = ws.id
-                clear_session()
-                st.session_state.workspace_id = ws.id
-                st.rerun()
-
-    sidebar_label("Data source")
-    uploaded_file = st.file_uploader(
-        "Upload spreadsheet",
-        type=["csv", "xlsx", "xls"],
-        label_visibility="collapsed",
-    )
-    uploaded_image = st.file_uploader(
-        "Extract from image",
-        type=["png", "jpg", "jpeg"],
-        label_visibility="collapsed",
-        help="Upload a photo of a table — Gemini will OCR it",
-    )
-
-    sidebar_label("Sample datasets")
-    samples = {
-        "Superstore Sales": "data/superstore_sales.csv",
-        "E-Commerce Transactions": "data/ecommerce_transactions.csv",
-        "Employee Data": "data/employee_data.csv",
-    }
-    sample_choice = st.selectbox(
-        "Sample",
-        ["Select…"] + list(samples.keys()),
-        label_visibility="collapsed",
-    )
-    if sample_choice != "Select…":
-        sample_path = samples[sample_choice]
-        if os.path.exists(sample_path):
-            if st.button("Load dataset", use_container_width=True, type="primary"):
-                with st.spinner("Loading & profiling…"):
-                    df = pd.read_csv(sample_path)
-                    init_database(df, sample_choice.lower().replace(" ", "_"),
-                                  original_filename=os.path.basename(sample_path))
-                st.rerun()
-        else:
-            st.caption(f"Missing: {sample_path}")
-
-    # --- Dataset library ---
-    _library = store.list_datasets(st.session_state.workspace_id)
-    if _library:
-        sidebar_label("Dataset library")
-        for ds in _library[:8]:
-            is_active = ds.id == st.session_state.dataset_id
-            label = f"{'●' if is_active else '○'}  {ds.name[:22]}"
-            if st.button(label, key=f"ds_{ds.id}", use_container_width=True):
-                with st.spinner("Loading dataset…"):
-                    rehydrate_dataset(ds.id)
-                st.rerun()
-
-    if st.session_state.df is not None:
-        sidebar_label("Active dataset")
-        st.markdown(
-            f"""
-            <div class="da-card">
-                <div class="da-card-title">{st.session_state.schema.table_name}</div>
-                <div class="da-card-sub">{st.session_state.schema.row_count:,} rows · {st.session_state.schema.column_count} cols</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+def _handle_file_upload(uploaded_file):
+    """Process an uploaded file and initialize the database."""
+    if uploaded_file.size > MAX_UPLOAD_BYTES:
+        st.error(
+            f"File too large ({uploaded_file.size / 1024 / 1024:.1f} MB). "
+            f"Limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
         )
-        if st.button("Clear session", use_container_width=True):
-            clear_session()
-            st.rerun()
-
-    if st.session_state.agent_log:
-        sidebar_label("Agent activity")
-        for entry in reversed(st.session_state.agent_log[-6:]):
-            ok = entry.get("status") == "success"
-            kind = "ok" if ok else "err"
-            st.markdown(
-                f"""
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.78rem;">
-                    <span style="color:var(--text-dim);">{entry['agent_name']}</span>
-                    {chip(f"{entry['duration_seconds']:.1f}s", kind)}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    # Session cost card — sums across all runs in this chat.
-    _cost = _session_cost_summary()
-    if _cost["n_runs"] > 0:
-        sidebar_label("Session cost")
-        st.markdown(
-            f"""
-            <div style="padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:10px;font-size:0.78rem;">
-                <div style="display:flex;justify-content:space-between;">
-                    <span style="color:var(--text-dim);">Runs</span>
-                    <span>{_cost['n_runs']}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;">
-                    <span style="color:var(--text-dim);">Tokens in</span>
-                    <span>{_cost['total_tokens_in']:,}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;">
-                    <span style="color:var(--text-dim);">Tokens out</span>
-                    <span>{_cost['total_tokens_out']:,}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;margin-top:0.3rem;padding-top:0.3rem;border-top:1px solid var(--border);">
-                    <span style="color:var(--text-dim);">Est. cost</span>
-                    <span><strong>${_cost['total_cost_usd']:.5f}</strong></span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-# --- File/image ingestion ---
-
-if uploaded_file is not None and st.session_state.df is None:
-    try:
-        if uploaded_file.size > MAX_UPLOAD_BYTES:
-            st.error(
-                f"File too large ({uploaded_file.size / 1024 / 1024:.1f} MB). "
-                f"Limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
-            )
-        else:
-            df = load_file(uploaded_file)
-            if len(df) > MAX_ROWS_INGEST:
-                st.warning(
-                    f"Dataset truncated to {MAX_ROWS_INGEST:,} rows "
-                    f"(uploaded {len(df):,})."
-                )
-                df = df.head(MAX_ROWS_INGEST)
-            table_name = uploaded_file.name.rsplit(".", 1)[0].lower().replace(" ", "_")
-            with st.spinner("Profiling dataset…"):
-                init_database(df, table_name, original_filename=uploaded_file.name)
-            log.info("Loaded %s rows=%d cols=%d", table_name, len(df), len(df.columns))
-            st.rerun()
-    except Exception as e:
-        log.exception("Upload failed")
-        st.error(f"Couldn't read that file — {e}")
-
-if uploaded_image is not None and st.session_state.df is None:
-    st.image(uploaded_image, use_container_width=True)
-    with st.spinner("Extracting table from image…"):
-        image_bytes = uploaded_image.read()
-        mime = f"image/{uploaded_image.name.rsplit('.', 1)[-1].lower()}"
-        if mime == "image/jpg":
-            mime = "image/jpeg"
-        csv_string, error = extract_table_from_image(image_bytes, mime)
-    if error:
-        st.error(error)
-    elif csv_string:
-        df = parse_csv_string(csv_string)
-        if df is not None:
-            st.subheader("Extracted table")
-            edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-            if st.button("Use this data", type="primary"):
-                init_database(edited_df, "image_data", original_filename="image_extract")
-                st.rerun()
+        return False
+    df = load_file(uploaded_file)
+    if len(df) > MAX_ROWS_INGEST:
+        st.warning(f"Dataset truncated to {MAX_ROWS_INGEST:,} rows (uploaded {len(df):,}).")
+        df = df.head(MAX_ROWS_INGEST)
+    table_name = uploaded_file.name.rsplit(".", 1)[0].lower().replace(" ", "_")
+    with st.spinner("Profiling dataset..."):
+        init_database(df, table_name, original_filename=uploaded_file.name)
+    log.info("Loaded %s rows=%d cols=%d", table_name, len(df), len(df.columns))
+    return True
 
 
 # --- Navigation: handle browser back button ---
-# If the user pressed Back, query params lose "view=chat" but session
-# state still has a loaded dataset. Clear session to show landing page.
 if st.session_state.schema is not None and _QP_VIEW != "chat":
     clear_session()
     st.rerun()
 
-# --- Main content ---
+
+# =====================================================================
+# LANDING PAGE
+# =====================================================================
 
 if st.session_state.schema is None:
-    # Landing
+    topbar()
+
     hero(
         title="Ask your data anything.",
-        subtitle="Upload a spreadsheet and DataAgent's multi-agent system profiles, queries, "
-                 "visualizes, predicts, and narrates findings — grounded by a statistical critic.",
+        subtitle="Upload a spreadsheet and DataAgent's multi-agent system will profile, "
+                 "query, visualize, predict, and narrate — grounded by a statistical critic.",
         eyebrow="AI Data Analyst",
     )
 
-    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-
+    # Feature cards
     f1, f2, f3 = st.columns(3, gap="medium")
     with f1:
         feature_card("database", "Schema profiling",
                      "Infers column roles, distributions, and date ranges on upload.")
     with f2:
-        feature_card("brain", "Plan → code → critique",
+        feature_card("brain", "Plan, code, critique",
                      "Planner decomposes, Coder writes SQL, Critic validates rigor.")
     with f3:
         feature_card("chart", "Visualize & narrate",
@@ -619,33 +425,29 @@ if st.session_state.schema is None:
         feature_card("document", "Exec-ready reports",
                      "One click turns your session into a branded PDF deliverable.")
 
-    st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
 
-    # Quick-start buttons on the landing page so users don't need the sidebar
-    st.markdown(
-        '<div class="da-sidebar-label" style="margin:0 0 0.5rem 0;">Quick start — load a sample dataset</div>',
-        unsafe_allow_html=True,
-    )
+    # --- Quick start: sample datasets ---
+    section_label("Quick start — load a sample dataset")
     qs1, qs2, qs3 = st.columns(3, gap="medium")
-    _samples_landing = {
+    _samples = {
         "E-Commerce Transactions": "data/ecommerce_transactions.csv",
         "Superstore Sales": "data/superstore_sales.csv",
         "Employee Data": "data/employee_data.csv",
     }
-    for col, (name, path) in zip([qs1, qs2, qs3], _samples_landing.items()):
+    for col, (name, path) in zip([qs1, qs2, qs3], _samples.items()):
         if col.button(name, key=f"qs_{name}", use_container_width=True, type="primary"):
             if os.path.exists(path):
-                with st.spinner("Loading & profiling…"):
+                with st.spinner("Loading & profiling..."):
                     _df = pd.read_csv(path)
                     init_database(_df, name.lower().replace(" ", "_"),
                                   original_filename=os.path.basename(path))
                 st.rerun()
 
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
-    st.markdown(
-        '<div class="da-sidebar-label" style="margin:0 0 0.5rem 0;">Or upload your own file</div>',
-        unsafe_allow_html=True,
-    )
+
+    # --- Upload your own ---
+    section_label("Or upload your own file")
     landing_file = st.file_uploader(
         "Upload CSV or Excel",
         type=["csv", "xlsx", "xls"],
@@ -654,33 +456,75 @@ if st.session_state.schema is None:
     )
     if landing_file is not None:
         try:
-            if landing_file.size > MAX_UPLOAD_BYTES:
-                st.error(f"File too large ({landing_file.size / 1024 / 1024:.1f} MB). Limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB.")
-            else:
-                _df = load_file(landing_file)
-                if len(_df) > MAX_ROWS_INGEST:
-                    st.warning(f"Dataset truncated to {MAX_ROWS_INGEST:,} rows.")
-                    _df = _df.head(MAX_ROWS_INGEST)
-                _tname = landing_file.name.rsplit(".", 1)[0].lower().replace(" ", "_")
-                with st.spinner("Profiling dataset…"):
-                    init_database(_df, _tname, original_filename=landing_file.name)
+            if _handle_file_upload(landing_file):
                 st.rerun()
         except Exception as e:
             st.error(f"Couldn't read that file — {e}")
 
+    # --- Or extract from image ---
+    with st.expander("Extract table from image"):
+        landing_image = st.file_uploader(
+            "Upload a photo of a table",
+            type=["png", "jpg", "jpeg"],
+            label_visibility="collapsed",
+            key="landing_image",
+            help="Upload a photo of a table — Gemini will OCR it",
+        )
+        if landing_image is not None:
+            st.image(landing_image, use_container_width=True)
+            with st.spinner("Extracting table from image..."):
+                image_bytes = landing_image.read()
+                mime = f"image/{landing_image.name.rsplit('.', 1)[-1].lower()}"
+                if mime == "image/jpg":
+                    mime = "image/jpeg"
+                csv_string, error = extract_table_from_image(image_bytes, mime)
+            if error:
+                st.error(error)
+            elif csv_string:
+                df = parse_csv_string(csv_string)
+                if df is not None:
+                    edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
+                    if st.button("Use this data", type="primary"):
+                        init_database(edited_df, "image_data", original_filename="image_extract")
+                        st.rerun()
+
+    # --- Previously loaded datasets ---
+    _library = store.list_datasets(st.session_state.workspace_id)
+    if _library:
+        st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+        section_label("Recent datasets")
+        cols = st.columns(min(len(_library), 3), gap="medium")
+        for i, ds in enumerate(_library[:6]):
+            with cols[i % 3]:
+                if st.button(
+                    f"{ds.name.replace('_', ' ').title()}",
+                    key=f"lib_{ds.id}",
+                    use_container_width=True,
+                ):
+                    with st.spinner("Loading dataset..."):
+                        rehydrate_dataset(ds.id)
+                    st.rerun()
+
+
+# =====================================================================
+# ANALYSIS / CHAT PAGE
+# =====================================================================
+
 else:
     schema = st.session_state.schema
 
-    # Top navigation bar
+    # --- Top bar with navigation ---
+    topbar()
+
     nav_l, nav_c, nav_r = st.columns([1, 4, 1])
-    if nav_l.button("< Back", key="nav_back", use_container_width=True):
+    if nav_l.button("Back", key="nav_back", use_container_width=True):
         clear_session()
         st.rerun()
     nav_c.markdown(
         f'<div style="text-align:center;padding-top:0.3rem;">'
         f'<span style="font-weight:600;color:var(--text);font-size:1rem;">'
         f'{schema.table_name.replace("_", " ").title()}</span>'
-        f'<span style="color:var(--text-mute);font-size:0.85rem;margin-left:0.75rem;">'
+        f'<span style="color:var(--text-mute);font-size:0.82rem;margin-left:0.75rem;">'
         f'{schema.row_count:,} rows · {schema.column_count} columns</span></div>',
         unsafe_allow_html=True,
     )
@@ -690,16 +534,30 @@ else:
         st.session_state.agent_log = []
         st.rerun()
 
+    # --- Dataset overview (collapsed) ---
     with st.expander("Dataset overview", expanded=False):
         render_profile(schema)
         st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), use_container_width=True)
 
-    # Starter suggestions (only when the chat is empty)
-    if not st.session_state.messages and schema.suggested_questions:
+    # --- Session info bar (replaces sidebar cost/activity) ---
+    _cost = _session_cost_summary()
+    if _cost["n_runs"] > 0:
+        cost_str = f"${_cost['total_cost_usd']:.5f}" if _cost["total_cost_usd"] > 0 else "—"
         st.markdown(
-            '<div class="da-sidebar-label" style="margin:1rem 0 0.5rem 0;">Starter questions</div>',
+            f"""
+            <div class="da-info-bar">
+                <div class="da-info-item">{icon("bolt", 13)} <strong>{_cost['n_runs']}</strong> runs</div>
+                <div class="da-info-item">Tokens: <strong>{_cost['total_tokens_in'] + _cost['total_tokens_out']:,}</strong></div>
+                <div class="da-info-item">Cost: <strong>{cost_str}</strong></div>
+                <div class="da-info-item">Duration: <strong>{_cost['total_duration_ms']/1000:.1f}s</strong></div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
+    # --- Starter suggestions ---
+    if not st.session_state.messages and schema.suggested_questions:
+        section_label("Starter questions")
         st.markdown('<div class="da-suggest-anchor"></div>', unsafe_allow_html=True)
         cols = st.columns(3, gap="medium")
         for i, q in enumerate(schema.suggested_questions[:6]):
@@ -707,7 +565,7 @@ else:
                 st.session_state["_pending_q"] = q
                 st.rerun()
 
-    # Render chat history
+    # --- Chat history ---
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
             with st.chat_message("user"):
@@ -720,17 +578,16 @@ else:
                     should_stream = (st.session_state.stream_target == idx)
                     render_assistant_body(msg["analysis"], should_stream=should_stream)
 
-    # Clear one-shot stream flag after render
     if st.session_state.stream_target is not None:
         st.session_state.stream_target = None
 
-    # Chat input
+    # --- Chat input ---
     pending = st.session_state.pop("_pending_q", None)
-    prompt = st.chat_input("Ask a question about your data…")
+    prompt = st.chat_input("Ask a question about your data...")
     if pending and not prompt:
         prompt = pending
 
-    # Action row: report export
+    # --- Action row: report export ---
     with st.container():
         col_a, col_b, col_c = st.columns([1, 1, 2])
         report_clicked = col_a.button("Export PDF report", use_container_width=True,
@@ -738,7 +595,7 @@ else:
         md_clicked = col_b.button("Export Markdown", use_container_width=True,
                                    disabled=not st.session_state.analyses)
 
-    # Handle new chat turn
+    # --- Handle new chat turn ---
     if prompt:
         log.info("User: %s", prompt[:80])
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -756,7 +613,7 @@ else:
             }
 
             result = None
-            with st.status("Agents working…", expanded=True) as status:
+            with st.status("Agents working...", expanded=True) as status:
                 for node, state in run_analysis_stream(
                     question=contextual_q,
                     schema=schema,
@@ -782,10 +639,6 @@ else:
 
             with st.chat_message("assistant"):
                 if not has_data or val_status == "rejected":
-                    # Don't stream a narrative when there's no data or the
-                    # critic rejected — the LLM would hallucinate from
-                    # the question alone, producing a confident-sounding
-                    # answer backed by nothing.
                     error_msg = result.get("error") or ""
                     if "QuotaExhausted" in error_msg:
                         narrative = "The AI service quota has been exceeded. Please try again later."
@@ -852,8 +705,6 @@ else:
                 "question": prompt,
                 "analysis": analysis,
             })
-            # Narrative was already streamed live via stream_narrative above,
-            # so leave stream_target=None to avoid a fake-stream replay on rerun.
             st.session_state.stream_target = None
         except Exception as e:
             log.exception("Analysis failed")
@@ -876,7 +727,7 @@ else:
 
     # --- Report export handlers ---
     if (report_clicked or md_clicked) and st.session_state.analyses:
-        with st.spinner("Assembling report…"):
+        with st.spinner("Assembling report..."):
             try:
                 schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
                 session_data = {
