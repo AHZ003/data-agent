@@ -151,27 +151,42 @@ section[data-testid="stSidebar"] [data-testid="stSpinner"] {
 
 /* Chat messages */
 [data-testid="stChatMessage"] {
-  background: var(--panel) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
-  padding: 1rem 1.25rem !important;
-  margin-bottom: 0.85rem !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 1.25rem 0 !important;
+  margin-bottom: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
   animation: daFadeUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 [data-testid="stChatMessage"]:has([data-testid*="ChatAvatarIcon-user"]) {
-  background: var(--panel-2) !important;
-  border-color: var(--border-strong) !important;
-}
-[data-testid="stChatMessageAvatarUser"],
-[data-testid="stChatMessageAvatarAssistant"],
-[data-testid*="ChatAvatarIcon"] {
   background: transparent !important;
-  width: 28px !important;
-  height: 28px !important;
+  border-color: var(--border) !important;
+}
+[data-testid="stChatMessageAvatarUser"] {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--border-strong) !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+}
+[data-testid="stChatMessageAvatarAssistant"],
+[data-testid*="ChatAvatarIcon-assistant"] {
+  background: linear-gradient(135deg, #8A6BFF 0%, #5A3FD6 100%) !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  box-shadow: 0 2px 8px rgba(124,92,255,0.3);
 }
 [data-testid="stChatMessage"] .stMarkdown p {
   color: var(--text) !important;
-  line-height: 1.55 !important;
+  line-height: 1.65 !important;
+  font-size: 0.9rem !important;
+}
+[data-testid="stChatMessage"] .stMarkdown li {
+  color: var(--text) !important;
+  line-height: 1.65 !important;
+  font-size: 0.9rem !important;
 }
 
 /* Chat input */
@@ -200,16 +215,27 @@ section[data-testid="stSidebar"] [data-testid="stSpinner"] {
   border-radius: 10px !important;
 }
 
-/* Result titles inside chat messages */
-[data-testid="stChatMessage"] .da-result-q {
-  margin-top: 0 !important;
+/* Status expander inside chat */
+[data-testid="stChatMessage"] [data-testid="stStatusWidget"] {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  margin: 0.5rem 0 !important;
 }
-[data-testid="stChatMessage"] .da-result-title {
-  margin: 0.1rem 0 0.85rem 0 !important;
-  font-size: 1rem !important;
+
+/* Tab styling inside chat */
+[data-testid="stChatMessage"] .stTabs [data-baseweb="tab-list"] {
+  gap: 0 !important;
+  border-bottom: 1px solid var(--border) !important;
 }
-[data-testid="stChatMessage"] .da-result-narrative {
-  margin-top: 0 !important;
+[data-testid="stChatMessage"] .stTabs [data-baseweb="tab"] {
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  color: var(--text-dim) !important;
+  padding: 0.5rem 1rem !important;
+}
+[data-testid="stChatMessage"] .stTabs [aria-selected="true"] {
+  color: var(--accent) !important;
 }
 
 /* Smooth scrollbar */

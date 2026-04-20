@@ -35,8 +35,7 @@ def _build_narrative_prompt(
 ANALYSIS CONTEXT:
 {chr(10).join(context_parts)}
 
-Write a concise 2-4 sentence narrative explaining the findings. Be specific with numbers.
-If there are warnings, mention the caveats. Use plain business English."""
+Write the narrative now. Lead with the key finding, include specific numbers, and end with an actionable takeaway."""
 
 
 def generate_narrative(
