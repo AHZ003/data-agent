@@ -602,10 +602,31 @@ if st.session_state.schema is None:
         feature_card("document", "Exec-ready reports",
                      "One click turns your session into a branded PDF deliverable.")
 
-    st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:1.5rem'></div>", unsafe_allow_html=True)
+
+    # Quick-start buttons on the landing page so users don't need the sidebar
     st.markdown(
-        '<div style="color:var(--text-mute);font-size:0.82rem;">'
-        'Get started — upload a file or load a sample dataset from the sidebar.'
+        '<div class="da-sidebar-label" style="margin:0 0 0.5rem 0;">Quick start — load a sample dataset</div>',
+        unsafe_allow_html=True,
+    )
+    qs1, qs2, qs3 = st.columns(3, gap="medium")
+    _samples_landing = {
+        "E-Commerce Transactions": "data/ecommerce_transactions.csv",
+        "Superstore Sales": "data/superstore_sales.csv",
+        "Employee Data": "data/employee_data.csv",
+    }
+    for col, (name, path) in zip([qs1, qs2, qs3], _samples_landing.items()):
+        if col.button(name, key=f"qs_{name}", use_container_width=True, type="primary"):
+            if os.path.exists(path):
+                with st.spinner("Loading & profiling…"):
+                    _df = pd.read_csv(path)
+                    init_database(_df, name.lower().replace(" ", "_"),
+                                  original_filename=os.path.basename(path))
+                st.rerun()
+
+    st.markdown(
+        '<div style="color:var(--text-mute);font-size:0.82rem;margin-top:1rem;">'
+        'Or upload your own file from the sidebar.'
         '</div>',
         unsafe_allow_html=True,
     )
