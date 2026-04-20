@@ -134,6 +134,122 @@ _CORRELATION_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+_EDA_KEYWORDS = re.compile(
+    r"\bdescribe\b.*\bdata\b|\bdata\b.*\bdescri|\bEDA\b|\bexploratory\b"
+    r"|\boverview\b.*\bdata|\bdata\b.*\boverview"
+    r"|\bsummar\w+\b.*\b(data|dataset|table)\b"
+    r"|\breport\b.*\b(descri|data|dataset)"
+    r"|\bdata\b.*\breport\b|\bprofile\b.*\b(data|dataset)"
+    r"|\b(data|dataset)\b.*\bprofile",
+    re.IGNORECASE,
+)
+
+
+def _pandas_eda(df: pd.DataFrame, schema: SemanticSchema) -> pd.DataFrame:
+    """Comprehensive Exploratory Data Analysis using pandas + scipy."""
+    import numpy as np
+    from core.stats import iqr_outliers, skewness_check, correlation_test
+
+    rows = []
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    cat_cols = df.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+    date_cols = df.select_dtypes(include="datetime").columns.tolist()
+
+    # Dataset overview row
+    rows.append({
+        "Section": "Overview",
+        "Metric": "Dataset Shape",
+        "Value": f"{len(df):,} rows x {len(df.columns)} columns",
+        "Detail": f"Numeric: {len(numeric_cols)}, Categorical: {len(cat_cols)}, Datetime: {len(date_cols)}",
+    })
+    total_missing = df.isnull().sum().sum()
+    total_cells = df.shape[0] * df.shape[1]
+    rows.append({
+        "Section": "Overview",
+        "Metric": "Missing Values",
+        "Value": f"{total_missing:,} ({total_missing / total_cells * 100:.1f}%)",
+        "Detail": "Total missing cells across all columns",
+    })
+    dup_count = df.duplicated().sum()
+    if dup_count > 0:
+        rows.append({
+            "Section": "Overview",
+            "Metric": "Duplicate Rows",
+            "Value": f"{dup_count:,} ({dup_count / len(df) * 100:.1f}%)",
+            "Detail": "Exact duplicate rows",
+        })
+
+    # Numeric column stats
+    for col in numeric_cols:
+        s = df[col].dropna()
+        if len(s) == 0:
+            continue
+        rows.append({
+            "Section": "Numeric Stats",
+            "Metric": col,
+            "Value": f"mean={s.mean():.2f}, std={s.std():.2f}",
+            "Detail": f"min={s.min():.2f}, 25%={s.quantile(.25):.2f}, "
+                      f"median={s.median():.2f}, 75%={s.quantile(.75):.2f}, max={s.max():.2f}",
+        })
+
+        # Outlier analysis
+        out = iqr_outliers(s)
+        if out and out.n_outliers > 0:
+            rows.append({
+                "Section": "Outliers",
+                "Metric": col,
+                "Value": f"{out.n_outliers} outliers ({out.share * 100:.1f}%)",
+                "Detail": f"Tukey fences: [{out.lower_fence:.2f}, {out.upper_fence:.2f}]",
+            })
+
+        # Skewness
+        sk = skewness_check(s)
+        if sk and sk.verdict != "symmetric":
+            rows.append({
+                "Section": "Distribution",
+                "Metric": f"{col} skewness",
+                "Value": f"{sk.skew:.3f} ({sk.verdict})",
+                "Detail": f"p-value={sk.p_value:.4f}" if sk.p_value is not None else "n too small for test",
+            })
+
+    # Categorical column stats
+    for col in cat_cols:
+        n_unique = df[col].nunique()
+        top = df[col].value_counts().head(3)
+        top_str = ", ".join(f"{v} ({c})" for v, c in top.items())
+        rows.append({
+            "Section": "Categorical Stats",
+            "Metric": col,
+            "Value": f"{n_unique} unique values",
+            "Detail": f"Top: {top_str}",
+        })
+
+    # Correlations between numeric columns
+    if len(numeric_cols) >= 2:
+        for i, a in enumerate(numeric_cols):
+            for b in numeric_cols[i + 1:]:
+                cr = correlation_test(df[a], df[b])
+                if cr:
+                    rows.append({
+                        "Section": "Correlations",
+                        "Metric": f"{a} vs {b}",
+                        "Value": f"r={cr.r:.4f} ({cr.verdict})",
+                        "Detail": f"p={cr.p_value:.6f}, n={cr.n}, significant={cr.significant}",
+                    })
+
+    # Missing value breakdown per column (only if any)
+    missing = df.isnull().sum()
+    missing = missing[missing > 0].sort_values(ascending=False)
+    for col, count in missing.items():
+        rows.append({
+            "Section": "Missing Values",
+            "Metric": str(col),
+            "Value": f"{count:,} ({count / len(df) * 100:.1f}%)",
+            "Detail": "Missing values in this column",
+        })
+
+    return pd.DataFrame(rows)
+
 
 def execute_analysis(
     question: str,
@@ -145,8 +261,29 @@ def execute_analysis(
     Generate SQL from a question, execute it, and return results.
 
     Implements self-correction: if the query fails, retries up to MAX_RETRY_ATTEMPTS.
-    Falls back to pandas for correlation queries that SQLite can't handle.
+    Falls back to pandas for correlation and EDA queries that SQL handles poorly.
     """
+    # EDA/describe questions are best handled by pandas, not SQL
+    if _EDA_KEYWORDS.search(question) and source_df is not None:
+        eda_df = _pandas_eda(source_df, schema)
+        return eda_df, CodeResult(
+            sql_query="-- Exploratory Data Analysis computed via pandas + scipy",
+            success=True,
+            row_count=len(eda_df),
+            columns=list(eda_df.columns),
+        )
+
+    # Correlation questions: try pandas first (SQLite lacks CORR())
+    if _CORRELATION_KEYWORDS.search(question) and source_df is not None:
+        corr_df = _pandas_correlation(source_df)
+        if corr_df is not None and len(corr_df) > 0:
+            return corr_df, CodeResult(
+                sql_query="-- Computed via pandas df.corr() + scipy pearsonr",
+                success=True,
+                row_count=len(corr_df),
+                columns=list(corr_df.columns),
+            )
+
     last_error = ""
     last_sql = ""
     for attempt in range(MAX_RETRY_ATTEMPTS):
@@ -181,17 +318,6 @@ def execute_analysis(
                     error=f"{QUOTA_SENTINEL}: {e}",
                 )
             last_error = str(e)
-
-    # SQL retries exhausted — try pandas fallback for correlation queries
-    if _CORRELATION_KEYWORDS.search(question) and source_df is not None:
-        corr_df = _pandas_correlation(source_df)
-        if corr_df is not None and len(corr_df) > 0:
-            return corr_df, CodeResult(
-                sql_query="-- Computed via pandas df.corr() (SQLite lacks CORR())",
-                success=True,
-                row_count=len(corr_df),
-                columns=list(corr_df.columns),
-            )
 
     return None, CodeResult(
         sql_query=last_sql,
