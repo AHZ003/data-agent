@@ -262,10 +262,13 @@ def render_assistant_body(analysis: dict, should_stream: bool):
 
     # Narrative
     if analysis.get("narrative"):
-        if should_stream:
-            st.write_stream(type_stream(analysis["narrative"], words_per_chunk=2, delay=0.025))
+        narrative_text = analysis["narrative"]
+        if "encountered an error" in narrative_text:
+            st.info("The AI narrative service was temporarily unavailable. Your data results are shown below.")
+        elif should_stream:
+            st.write_stream(type_stream(narrative_text, words_per_chunk=2, delay=0.025))
         else:
-            st.markdown(analysis["narrative"])
+            st.markdown(narrative_text)
 
     # Chart
     if analysis.get("chart") is not None:
@@ -651,19 +654,34 @@ else:
                     st.warning(narrative)
                 else:
                     result_summary = result_df.head(20).to_string()
-                    narrative = st.write_stream(
-                        storyteller_agent.stream_narrative(
-                            question=contextual_q,
-                            sql_query=result.get("sql_query", "") or "",
-                            result_summary=result_summary,
-                            chart_description=(result.get("chart_config") or {}).get("chart_type", ""),
-                            validation_warnings=validation.get("warnings", []),
-                            prediction_info=result.get("prediction"),
-                        )
+                    narrative_stream = storyteller_agent.stream_narrative(
+                        question=contextual_q,
+                        sql_query=result.get("sql_query", "") or "",
+                        result_summary=result_summary,
+                        chart_description=(result.get("chart_config") or {}).get("chart_type", ""),
+                        validation_warnings=validation.get("warnings", []),
+                        prediction_info=result.get("prediction"),
                     )
-                    # If the narrative contains an error from the storyteller, show as warning
-                    if narrative and "encountered an error" in str(narrative):
-                        st.warning("The narrative could not be fully generated. The data results above are still valid.")
+                    # Collect the first chunk to check for errors before displaying
+                    first_chunks = []
+                    is_error = False
+                    for chunk in narrative_stream:
+                        first_chunks.append(chunk)
+                        full_so_far = "".join(first_chunks)
+                        if "encountered an error" in full_so_far:
+                            is_error = True
+                            break
+                        # Once we have enough text to confirm it's real, stream the rest
+                        if len(full_so_far) > 50:
+                            break
+
+                    if is_error:
+                        narrative = "".join(first_chunks)
+                        st.info("The AI narrative service is temporarily unavailable. Your data results are shown below.")
+                    else:
+                        # Stream remaining chunks with the buffered ones prepended
+                        import itertools
+                        narrative = st.write_stream(itertools.chain(first_chunks, narrative_stream))
 
                 # Show chart inline on first render
                 if result.get("chart") is not None:
