@@ -456,12 +456,13 @@ hr {
   animation: daFadeIn 0.5s ease-out both;
 }
 .da-hero-title {
-  font-size: 2.75rem;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 1.08;
-  margin: 0 0 0.75rem 0;
-  color: var(--text);
+  font-size: 2.75rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.04em !important;
+  line-height: 1.08 !important;
+  margin: 0 0 0.75rem 0 !important;
+  color: var(--text) !important;
+  text-align: center !important;
   animation: daFadeUp 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   animation-delay: 0.06s;
 }
@@ -471,6 +472,7 @@ hr {
   max-width: 580px;
   line-height: 1.6;
   margin: 0 auto;
+  text-align: center !important;
   animation: daFadeUp 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   animation-delay: 0.12s;
 }

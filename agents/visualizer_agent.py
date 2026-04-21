@@ -41,6 +41,16 @@ def _classify_chart_type(df: pd.DataFrame, question: str) -> ChartConfig:
             y_column=num_cols[0],
         )
 
+    # Trivial results (very few rows, no explicit chart request) -> table
+    # A chart with 1-3 data points is usually less useful than the raw numbers.
+    _chart_keywords = [
+        "distribution", "histogram", "chart", "plot", "graph", "visuali",
+        "proportion", "share", "percentage", "pie", "trend", "over time",
+    ]
+    user_wants_chart = any(w in question_lower for w in _chart_keywords)
+    if not user_wants_chart and len(df) <= 3 and len(df.columns) <= 4:
+        return ChartConfig(chart_type=ChartType.TABLE, title=question)
+
     # No usable columns -> table
     if not num_cols and not cat_cols and not date_cols:
         return ChartConfig(chart_type=ChartType.TABLE, title=question)
