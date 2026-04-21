@@ -27,9 +27,16 @@ def forecast_time_series(
     ts_df[date_col] = pd.to_datetime(ts_df[date_col])
     ts_df = ts_df.sort_values(date_col).dropna()
 
+    if len(ts_df) < 4:
+        raise ValueError(f"Need at least 4 data points for forecasting, got {len(ts_df)}.")
+
     # Detect frequency
     diffs = ts_df[date_col].diff().dropna()
+    if len(diffs) == 0:
+        raise ValueError("Cannot determine time frequency — only one data point.")
     median_diff = diffs.median()
+    if pd.isna(median_diff):
+        raise ValueError("Cannot determine time frequency from dates.")
     if median_diff <= pd.Timedelta(days=2):
         freq = "D"
     elif median_diff <= pd.Timedelta(days=8):

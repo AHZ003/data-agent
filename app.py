@@ -19,7 +19,7 @@ from agents.storyteller_agent import generate_full_report, report_to_markdown
 from agents.orchestrator import run_analysis, run_analysis_stream
 from models.analysis_plan import SemanticSchema, ColumnRole
 from assets.ui import (
-    inject_theme, topbar, section_label, hero, feature_card,
+    inject_theme, section_label, hero, feature_card,
     result_header, narrative_block, chip, icon,
 )
 from assets.plotly_theme import register as register_plotly_theme
@@ -220,8 +220,7 @@ def _render_trace_panel(run_id: str):
             "status": s.get("status", ""),
             "model": s.get("model") or "",
         })
-    import pandas as _pd
-    df_trace = _pd.DataFrame(rows)
+    df_trace = pd.DataFrame(rows)
     st.dataframe(df_trace, use_container_width=True, hide_index=True)
     st.caption(f"run_id: `{run_id}` — trace file: `outputs/traces/`")
 

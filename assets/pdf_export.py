@@ -18,14 +18,14 @@ from reportlab.platypus import (
 from models.report import AnalysisReport
 
 
-# Brand palette (matches app theme)
-BRAND_ACCENT = colors.HexColor("#7C5CFF")
-BRAND_ACCENT_DARK = colors.HexColor("#5A3FD6")
-TEXT_PRIMARY = colors.HexColor("#14141B")
-TEXT_SECONDARY = colors.HexColor("#55556A")
-TEXT_MUTED = colors.HexColor("#9A9AAD")
-BG_PANEL = colors.HexColor("#F7F7FB")
-BORDER = colors.HexColor("#E5E5EE")
+# Brand palette (matches app light theme)
+BRAND_ACCENT = colors.HexColor("#6C5CE7")
+BRAND_ACCENT_DARK = colors.HexColor("#5A4BD1")
+TEXT_PRIMARY = colors.HexColor("#1A1D26")
+TEXT_SECONDARY = colors.HexColor("#5A6070")
+TEXT_MUTED = colors.HexColor("#8E95A3")
+BG_PANEL = colors.HexColor("#F7F8FA")
+BORDER = colors.HexColor("#E2E5EA")
 
 
 def _make_styles() -> dict:
