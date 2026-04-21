@@ -171,8 +171,9 @@ h3 { font-size: 1.125rem !important; }
 }
 
 /* Chat input */
-[data-testid="stChatInput"] {
-  background: var(--panel) !important;
+[data-testid="stChatInput"],
+[data-testid="stChatInput"] > div {
+  background: #FFFFFF !important;
   border: 1px solid var(--border-strong) !important;
   border-radius: 14px !important;
   padding: 0.35rem 0.35rem 0.35rem 1rem !important;
@@ -183,10 +184,17 @@ h3 { font-size: 1.125rem !important; }
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(108,92,231,0.12), var(--shadow-md) !important;
 }
-[data-testid="stChatInput"] textarea {
-  background: transparent !important;
-  color: var(--text) !important;
+[data-testid="stChatInput"] textarea,
+[data-testid="stChatInput"] textarea::placeholder {
+  background: #FFFFFF !important;
+  color: #1A1D26 !important;
   font-size: 0.9rem !important;
+  caret-color: #1A1D26 !important;
+  -webkit-text-fill-color: #1A1D26 !important;
+}
+[data-testid="stChatInput"] textarea::placeholder {
+  color: #8E95A3 !important;
+  -webkit-text-fill-color: #8E95A3 !important;
 }
 [data-testid="stChatInput"] button {
   background: linear-gradient(180deg, #6C5CE7 0%, #5A4BD1 100%) !important;
@@ -371,14 +379,14 @@ h3 { font-size: 1.125rem !important; }
   color: #1B6B3A !important;
 }
 
-/* Bottom chat input container — match page background */
+/* Bottom chat input container — force light background */
 [data-testid="stBottom"],
+[data-testid="stBottom"] > div,
+[data-testid="stBottom"] > div > div,
 [data-testid="stChatInputContainer"],
 .stChatInput {
-  background: var(--bg) !important;
+  background: #F7F8FA !important;
 }
-[data-testid="stBottom"] > div {
-  background: var(--bg) !important;
 }
 
 /* Divider */
