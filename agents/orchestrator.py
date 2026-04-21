@@ -33,6 +33,7 @@ from config import MODEL_NAME
 class AgentState(TypedDict):
     """State passed between agents in the graph."""
     question: str
+    display_question: Optional[str]  # Original user prompt (no context prefix) for chart titles
     schema: Optional[dict]
     plan: Optional[dict]
     sql_query: Optional[str]
@@ -161,11 +162,14 @@ def visualizer_node(state: AgentState) -> AgentState:
     """Run the Visualizer Agent to generate charts."""
     start = time.time()
     result_df = state.get("result_df")
+    # Use display_question (original user prompt) for chart titles to avoid
+    # showing the "Earlier questions in this conversation:..." prefix.
+    chart_q = state.get("display_question") or state["question"]
 
     with tracing.span("visualizer", model=MODEL_NAME) as _t:
         if result_df is not None and len(result_df) > 0:
-            chart_config = visualizer_agent.get_chart_config(result_df, state["question"])
-            chart = visualizer_agent.generate_chart(result_df, state["question"], chart_config)
+            chart_config = visualizer_agent.get_chart_config(result_df, chart_q)
+            chart = visualizer_agent.generate_chart(result_df, chart_q, chart_config)
             state["chart"] = chart
             state["chart_config"] = chart_config.model_dump()
             _t.add_metadata(chart_type=getattr(chart_config.chart_type, "value", str(chart_config.chart_type)))
@@ -364,6 +368,7 @@ def run_analysis(
     schema: SemanticSchema,
     db: Database,
     df: pd.DataFrame,
+    display_question: Optional[str] = None,
 ) -> AgentState:
     """
     Run the full agent pipeline for a question.
@@ -375,6 +380,7 @@ def run_analysis(
 
     initial_state: AgentState = {
         "question": question,
+        "display_question": display_question or question,
         "schema": schema.model_dump(),
         "plan": None,
         "sql_query": None,
@@ -410,6 +416,7 @@ def run_analysis_stream(
     db: Database,
     df: pd.DataFrame,
     skip_storyteller: bool = False,
+    display_question: Optional[str] = None,
 ):
     """
     Streaming version of run_analysis.
@@ -423,6 +430,7 @@ def run_analysis_stream(
 
     initial_state: AgentState = {
         "question": question,
+        "display_question": display_question or question,
         "schema": schema.model_dump(),
         "plan": None,
         "sql_query": None,

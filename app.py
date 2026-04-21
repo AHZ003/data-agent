@@ -613,6 +613,7 @@ else:
                     db=st.session_state.db,
                     df=st.session_state.df,
                     skip_storyteller=True,
+                    display_question=prompt,
                 ):
                     if node == "done":
                         result = state
@@ -660,6 +661,9 @@ else:
                             prediction_info=result.get("prediction"),
                         )
                     )
+                    # If the narrative contains an error from the storyteller, show as warning
+                    if narrative and "encountered an error" in str(narrative):
+                        st.warning("The narrative could not be fully generated. The data results above are still valid.")
 
                 # Show chart inline on first render
                 if result.get("chart") is not None:
