@@ -509,16 +509,16 @@ if st.session_state.schema is None:
 else:
     schema = st.session_state.schema
 
-    nav_l, nav_c, nav_r = st.columns([1, 4, 1])
-    if nav_l.button("Back", key="nav_back", use_container_width=True):
+    nav_l, nav_c, nav_r = st.columns([1, 5, 1])
+    if nav_l.button("< Back", key="nav_back", use_container_width=True):
         clear_session()
         st.rerun()
     nav_c.markdown(
-        f'<div style="text-align:center;padding-top:0.3rem;">'
-        f'<span style="font-weight:600;color:var(--text);font-size:1rem;">'
+        f'<div style="text-align:center;padding-top:0.25rem;">'
+        f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">'
         f'{schema.table_name.replace("_", " ").title()}</span>'
-        f'<span style="color:var(--text-mute);font-size:0.82rem;margin-left:0.75rem;">'
-        f'{schema.row_count:,} rows · {schema.column_count} columns</span></div>',
+        f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">'
+        f'{schema.row_count:,} rows · {schema.column_count} cols</span></div>',
         unsafe_allow_html=True,
     )
     if nav_r.button("New chat", key="nav_new", use_container_width=True):
@@ -532,19 +532,20 @@ else:
         render_profile(schema)
         st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), use_container_width=True)
 
-    # --- Session info bar (replaces sidebar cost/activity) ---
+    # --- Session info bar ---
     _cost = _session_cost_summary()
     if _cost["n_runs"] > 0:
-        cost_str = f"${_cost['total_cost_usd']:.5f}" if _cost["total_cost_usd"] > 0 else "—"
+        _info_parts = [
+            f'<div class="da-info-item">{icon("bolt", 13)} <strong>{_cost["n_runs"]}</strong> {"run" if _cost["n_runs"] == 1 else "runs"}</div>',
+            f'<div class="da-info-item">Duration: <strong>{_cost["total_duration_ms"]/1000:.1f}s</strong></div>',
+        ]
+        _total_tokens = _cost["total_tokens_in"] + _cost["total_tokens_out"]
+        if _total_tokens > 0:
+            _info_parts.append(f'<div class="da-info-item">Tokens: <strong>{_total_tokens:,}</strong></div>')
+        if _cost["total_cost_usd"] > 0:
+            _info_parts.append(f'<div class="da-info-item">Cost: <strong>${_cost["total_cost_usd"]:.5f}</strong></div>')
         st.markdown(
-            f"""
-            <div class="da-info-bar">
-                <div class="da-info-item">{icon("bolt", 13)} <strong>{_cost['n_runs']}</strong> runs</div>
-                <div class="da-info-item">Tokens: <strong>{_cost['total_tokens_in'] + _cost['total_tokens_out']:,}</strong></div>
-                <div class="da-info-item">Cost: <strong>{cost_str}</strong></div>
-                <div class="da-info-item">Duration: <strong>{_cost['total_duration_ms']/1000:.1f}s</strong></div>
-            </div>
-            """,
+            f'<div class="da-info-bar">{"".join(_info_parts)}</div>',
             unsafe_allow_html=True,
         )
 
