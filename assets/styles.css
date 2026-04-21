@@ -457,12 +457,12 @@ hr {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem 1.35rem;
-  height: 100%;
-  min-height: 148px;
+  height: 160px;
   display: flex;
   flex-direction: column;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 .da-feature:hover {
   border-color: var(--accent-border);
