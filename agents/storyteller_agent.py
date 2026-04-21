@@ -88,7 +88,7 @@ def stream_narrative(
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 temperature=0.3,
-                max_output_tokens=512,
+                max_output_tokens=1024,
             ),
         ):
             text = getattr(chunk, "text", None)
