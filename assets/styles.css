@@ -339,10 +339,46 @@ h3 { font-size: 1.125rem !important; }
   box-shadow: var(--shadow-sm);
 }
 
-/* Alerts */
+/* Alerts / Warnings — match light theme */
 [data-testid="stAlert"] {
   border-radius: var(--radius) !important;
   border: 1px solid var(--border) !important;
+  background: var(--panel) !important;
+  font-size: 0.85rem !important;
+}
+[data-testid="stAlert"] [data-testid="stAlertContentWarning"] {
+  background: #FFF8E7 !important;
+  border: 1px solid #F0DCA0 !important;
+  border-radius: var(--radius) !important;
+  color: #6B5900 !important;
+}
+[data-testid="stAlert"] [data-testid="stAlertContentInfo"] {
+  background: #EEF0FF !important;
+  border: 1px solid #C5CAFF !important;
+  border-radius: var(--radius) !important;
+  color: #3D3D8F !important;
+}
+[data-testid="stAlert"] [data-testid="stAlertContentError"] {
+  background: #FFF0EE !important;
+  border: 1px solid #FCCFC8 !important;
+  border-radius: var(--radius) !important;
+  color: #8B2500 !important;
+}
+[data-testid="stAlert"] [data-testid="stAlertContentSuccess"] {
+  background: #EEFBF4 !important;
+  border: 1px solid #A8E6C3 !important;
+  border-radius: var(--radius) !important;
+  color: #1B6B3A !important;
+}
+
+/* Bottom chat input container — match page background */
+[data-testid="stBottom"],
+[data-testid="stChatInputContainer"],
+.stChatInput {
+  background: var(--bg) !important;
+}
+[data-testid="stBottom"] > div {
+  background: var(--bg) !important;
 }
 
 /* Divider */
