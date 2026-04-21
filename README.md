@@ -4,7 +4,9 @@
 
 Built with LangGraph + Google Gemini + Streamlit. Seven specialized agents collaborate through a stateful graph with self-correction loops, structured tracing, and a production eval harness.
 
-<!-- Replace with your own screen recording: -->
+**[Live demo](https://ahz003-data-agent.streamlit.app)** | [Architecture](#architecture) | [Eval harness](#eval-harness)
+
+<!-- TODO: Replace with a screen recording or screenshot -->
 <!-- ![demo](docs/assets/demo.gif) -->
 
 ---
