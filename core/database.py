@@ -109,15 +109,6 @@ class Database:
         except Exception as e:
             return None, str(e)
 
-    def get_table_info(self) -> str:
-        """Get table schema information."""
-        cursor = self.conn.execute(f"PRAGMA table_info('{self.table_name}')")
-        columns = cursor.fetchall()
-        info_lines = [f"Table: {self.table_name}"]
-        for col in columns:
-            info_lines.append(f"  - {col[1]} ({col[2]})")
-        return "\n".join(info_lines)
-
     def close(self):
         """Close the database connection."""
         self.conn.close()

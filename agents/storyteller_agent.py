@@ -82,17 +82,20 @@ def stream_narrative(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
-    for chunk in client.models.generate_content_stream(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.3,
-            max_output_tokens=512,
-        ),
-    ):
-        text = getattr(chunk, "text", None)
-        if text:
-            yield text
+    try:
+        for chunk in client.models.generate_content_stream(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=512,
+            ),
+        ):
+            text = getattr(chunk, "text", None)
+            if text:
+                yield text
+    except Exception as e:
+        yield f"\n\n_Narrative generation encountered an error: {e}_"
 
 
 def generate_full_report(
