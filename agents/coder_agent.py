@@ -7,13 +7,13 @@ import pandas as pd
 from typing import Optional, Tuple
 
 from config import (
-from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     CODER_AGENT_SYSTEM_PROMPT,
     MAX_QUERY_ROWS,
     MAX_RETRY_ATTEMPTS,
 )
+from core import tracing
 from core.database import Database
 from core.datasource import DataSource
 from models.analysis_plan import SemanticSchema, CodeResult
