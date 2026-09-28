@@ -76,3 +76,28 @@ runs:
     evidence: true
     baseline: bird-flash-evidence-repair
     flags: {schema_k: 30, values: true, memory_k: 3, embedder: gemini}
+
+  # ── Models & cost frontier (P7) ────────────────────────────────────────
+  # Local models need Ollama running (ollama pull qwen2.5-coder:7b) and
+  # OLLAMA_USD_PER_HOUR set to your hardware's hourly price for costing.
+  - name: spider-pro-repair
+    benchmark: spider
+    model: gemini-2.5-pro
+    mode: repair
+    baseline: spider-flash-repair
+  - name: spider-qwen7b-base
+    benchmark: spider
+    model: ollama/qwen2.5-coder:7b
+    mode: repair
+    baseline: spider-flash-repair
+  - name: spider-finetuned-1.5b
+    benchmark: spider
+    model: ollama/dataagent-sql
+    mode: repair
+    baseline: spider-flash-repair
+  # Run after `python -m routing.train --cheap spider-flash-repair --strong spider-pro-repair`.
+  - name: spider-router
+    benchmark: spider
+    model: router:routing/router.json
+    mode: repair
+    baseline: spider-pro-repair

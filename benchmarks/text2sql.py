@@ -202,6 +202,15 @@ def retriever_for(cfg: RunConfig):
 _GOLD_CACHE: dict[tuple[str, str], tuple[Optional[list[tuple]], Optional[str]]] = {}
 
 
+def _route(spec: str, ex: Example, db) -> str:
+    """model 'router:<path>' -> the model the trained router picks for this question."""
+    from routing.router import Router, featurize
+
+    router = Router.load(ROOT / spec.split(":", 1)[1])
+    ds = db.datasource()
+    return router.pick(featurize(ex.question, ds.table_names, sum(len(t.columns) for t in ds.tables), ex.evidence))
+
+
 def format_question(ex: Example, use_evidence: bool) -> str:
     if use_evidence and ex.evidence:
         return f"{ex.question}\nHint: {ex.evidence}"
@@ -223,10 +232,11 @@ def run_example(ex: Example, db_path: Path, cfg: RunConfig, rule: str) -> Exampl
     db = Database.from_sqlite(str(db_path), name=ex.db_id, datasource=_DS_CACHE.get(db_path))
     db.max_rows = max(MAX_QUERY_ROWS, len(gold_rows or []) + 1)  # never truncate below gold
     db.timeout_seconds = PRED_TIMEOUT_S
+    model = _route(cfg.model, ex, db) if cfg.model.startswith("router:") else cfg.model
     start = time.time()
     with tracing.usage_scope() as usage:
         result_df, code = generate_and_execute(
-            format_question(ex, cfg.evidence), db, max_attempts=cfg.max_attempts, model=cfg.model,
+            format_question(ex, cfg.evidence), db, max_attempts=cfg.max_attempts, model=model,
             retriever=retriever_for(cfg),
         )
     latency = time.time() - start
