@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, List
 
 from config import (
+from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     CRITIC_AGENT_SYSTEM_PROMPT,
@@ -241,6 +242,7 @@ Return ONLY the JSON:"""
                 max_output_tokens=1024,
             ),
         )
+        tracing.record_usage(response, MODEL_NAME)
         text = response.text.strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)

@@ -15,6 +15,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from config import GOOGLE_API_KEY, MODEL_NAME
+from core import tracing
 
 
 @dataclass
@@ -256,6 +257,7 @@ def score_narrative_faithfulness(
             contents=prompt,
             config=genai_types.GenerateContentConfig(temperature=0.0, max_output_tokens=200),
         )
+        tracing.record_usage(resp, MODEL_NAME)
         text = resp.text.strip()
         if "{" in text:
             text = text[text.index("{") : text.rindex("}") + 1]

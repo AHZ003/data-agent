@@ -8,6 +8,7 @@ from google.genai import types as genai_types
 from typing import List
 
 from config import (
+from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     SCHEMA_AGENT_SYSTEM_PROMPT,
@@ -145,6 +146,7 @@ def _generate_suggested_questions(
                 max_output_tokens=1024,
             ),
         )
+        tracing.record_usage(response, MODEL_NAME)
         text = response.text.strip()
         # Parse JSON array from response
         if "[" in text:

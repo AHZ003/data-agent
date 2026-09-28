@@ -7,6 +7,7 @@ from google.genai import types as genai_types
 from typing import Iterator, List, Dict, Any, Optional
 
 from config import GOOGLE_API_KEY, MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
+from core import tracing
 from models.report import AnalysisReport, ReportSection
 
 
@@ -60,6 +61,7 @@ def generate_narrative(
             max_output_tokens=512,
         ),
     )
+    tracing.record_usage(response, MODEL_NAME)
     return response.text.strip()
 
 
@@ -82,6 +84,7 @@ def stream_narrative(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
+    last_chunk = None
     try:
         for chunk in client.models.generate_content_stream(
             model=MODEL_NAME,
@@ -91,9 +94,12 @@ def stream_narrative(
                 max_output_tokens=1024,
             ),
         ):
+            last_chunk = chunk
             text = getattr(chunk, "text", None)
             if text:
                 yield text
+        # Streamed usage metadata is cumulative; the last chunk has the total.
+        tracing.record_usage(last_chunk, MODEL_NAME)
     except Exception as e:
         yield f"\n\n_Narrative generation encountered an error: {e}_"
 
@@ -163,6 +169,7 @@ Return ONLY the JSON:"""
                 max_output_tokens=2048,
             ),
         )
+        tracing.record_usage(response, MODEL_NAME)
         text = response.text.strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)

@@ -7,6 +7,7 @@ import io
 from typing import Optional, Tuple
 
 from config import GOOGLE_API_KEY, MODEL_NAME, VISION_EXTRACTION_PROMPT
+from core import tracing
 
 
 def extract_table_from_image(
@@ -29,6 +30,7 @@ def extract_table_from_image(
                 max_output_tokens=4096,
             ),
         )
+        tracing.record_usage(response, MODEL_NAME)
         result = response.text.strip()
         if result == "NOT_A_TABLE":
             return None, "The uploaded image does not contain a recognizable table."
