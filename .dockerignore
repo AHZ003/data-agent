@@ -56,3 +56,9 @@ benchmarks/spider/
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# Benchmark downloads and local caches (large; not needed in the image)
+benchmarks/spider/
+benchmarks/bird/
+outputs/cache/
+.venv/

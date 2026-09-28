@@ -7,6 +7,5 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
     volumes:
       - ./outputs:/app/outputs
-      - ./rag/chroma_db:/app/rag/chroma_db
       - ./db_data:/app/db_data
     restart: unless-stopped

@@ -81,13 +81,14 @@ def version_info(name: str) -> Dict[str, str]:
 # Names tracked by the registry — order matches config.py so `version_map`
 # is stable across runs. Add new prompts here when you add a new .md file.
 REGISTRY = (
-    "schema_agent",
     "coder_agent",
     "planner_agent",
-    "critic_agent",
     "storyteller_agent",
     "suggested_questions",
     "vision_extraction",
+    "dialect_sqlite",
+    "dialect_duckdb",
+    "dialect_bigquery",
 )
 
 

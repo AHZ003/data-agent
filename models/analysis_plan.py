@@ -68,6 +68,8 @@ class AnalysisPlan(BaseModel):
     question: str
     analysis_types: List[AnalysisType]
     steps: List[PlanStep]
+    # Set only when the answer hinges on a choice the user must make.
+    clarifying_question: Optional[str] = None
 
 
 # --- Coder Agent Models ---
@@ -78,6 +80,7 @@ class CodeResult(BaseModel):
     error: Optional[str] = None
     row_count: int = 0
     columns: List[str] = Field(default_factory=list)
+    attempts: int = 0
 
 
 # --- Critic Agent Models ---

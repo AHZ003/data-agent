@@ -3,17 +3,14 @@
 import json
 import pandas as pd
 import numpy as np
-from google import genai
-from google.genai import types as genai_types
 from typing import List
 
 from config import (
-    GOOGLE_API_KEY,
-    MODEL_NAME,
-    SCHEMA_AGENT_SYSTEM_PROMPT,
     SUGGESTED_QUESTIONS_PROMPT,
     DEFAULT_TABLE_NAME,
+    model_for,
 )
+from core import llm
 from models.analysis_plan import ColumnProfile, ColumnRole, SemanticSchema
 
 _SUGGESTION_CACHE: dict = {}
@@ -131,21 +128,13 @@ def _suggest_analyses(columns: List[ColumnProfile]) -> List[str]:
 def _generate_suggested_questions(
     schema: SemanticSchema,
 ) -> List[str]:
-    """Use Gemini to generate suggested questions for the dataset."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    """Use the LLM to generate suggested questions for the dataset."""
 
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=f"Dataset profile:\n{schema_summary}\n\n{SUGGESTED_QUESTIONS_PROMPT}",
-            config=genai_types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=1024,
-            ),
-        )
-        text = response.text.strip()
+        text = llm.generate(f"Dataset profile:\n{schema_summary}\n\n{SUGGESTED_QUESTIONS_PROMPT}",
+                            model=model_for("schema"), temperature=0.7, max_output_tokens=1024).strip()
         # Parse JSON array from response
         if "[" in text:
             json_str = text[text.index("[") : text.rindex("]") + 1]
@@ -163,12 +152,16 @@ def _generate_suggested_questions(
 
 
 def profile_dataframe(
-    df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME
+    df: pd.DataFrame,
+    table_name: str = DEFAULT_TABLE_NAME,
+    suggest_questions: bool = True,
 ) -> SemanticSchema:
     """
     Profile a DataFrame and generate a semantic schema.
 
-    This is the main entry point for the Schema Agent.
+    This is the main entry point for the Schema Agent. Profiling is pure
+    pandas; `suggest_questions` adds one LLM call for the UI's starter
+    questions and is off when the graph profiles on its own.
     """
     # Auto-detect and convert datetime columns
     for col in df.columns:
@@ -188,6 +181,9 @@ def profile_dataframe(
         columns=columns,
         suggested_analyses=analyses,
     )
+
+    if not suggest_questions:
+        return schema
 
     # Generate AI-powered suggested questions (cached by dataset signature)
     key = _suggestion_cache_key(schema)

@@ -34,10 +34,8 @@ def test_every_registered_prompt_loads():
 def test_config_constants_match_registry():
     """Back-compat: `from config import X` must equal `prompts.get(...)`."""
     pairs = [
-        ("schema_agent", config.SCHEMA_AGENT_SYSTEM_PROMPT),
         ("coder_agent", config.CODER_AGENT_SYSTEM_PROMPT),
         ("planner_agent", config.PLANNER_AGENT_SYSTEM_PROMPT),
-        ("critic_agent", config.CRITIC_AGENT_SYSTEM_PROMPT),
         ("storyteller_agent", config.STORYTELLER_AGENT_SYSTEM_PROMPT),
         ("suggested_questions", config.SUGGESTED_QUESTIONS_PROMPT),
         ("vision_extraction", config.VISION_EXTRACTION_PROMPT),
@@ -47,10 +45,17 @@ def test_config_constants_match_registry():
 
 
 def test_coder_prompt_still_has_placeholders():
-    """The coder prompt is `.format()`ed with table_name / max_rows.
-    Removing these placeholders would cause a runtime KeyError in
-    coder_agent — pin them here so prompt edits catch it.
+    """The coder prompt is `.format()`ed with dialect / max_rows.
+    An unknown placeholder would raise KeyError in coder_agent at
+    runtime — pin the contract here so prompt edits catch it.
     """
     body = get("coder_agent")
-    assert "{table_name}" in body
+    assert "{dialect}" in body
     assert "{max_rows}" in body
+    assert "{dialect_notes}" in body
+    body.format(dialect="Sqlite", max_rows=10, dialect_notes="")
+
+
+def test_every_engine_dialect_has_notes():
+    for dialect in ("sqlite", "duckdb", "bigquery"):
+        assert get(f"dialect_{dialect}").strip()

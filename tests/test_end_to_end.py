@@ -25,7 +25,8 @@ def _make_test_data():
 
 
 def test_visualizer_bar_chart():
-    df = pd.DataFrame({"Category": ["A", "B", "C"], "Revenue": [100, 200, 300]})
+    # 5 rows: results with <=3 rows intentionally render as a table.
+    df = pd.DataFrame({"Category": list("ABCDE"), "Revenue": [100, 200, 300, 400, 500]})
     config = get_chart_config(df, "Revenue by category")
     assert config.chart_type in (ChartType.BAR, ChartType.HORIZONTAL_BAR)
     chart = generate_chart(df, "Revenue by category", config)

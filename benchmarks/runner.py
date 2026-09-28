@@ -50,7 +50,6 @@ def load_cases(path: Path = CASES_PATH) -> list[dict]:
 
 def run_one(case: dict, use_llm_judge: bool) -> "CaseScorecard":
     from agents.orchestrator import run_analysis
-    from agents.schema_agent import profile_dataframe
     from core.database import Database
     from benchmarks.scorers import score_case
 
@@ -58,13 +57,13 @@ def run_one(case: dict, use_llm_judge: bool) -> "CaseScorecard":
     df = pd.read_csv(dataset_path)
     db = Database()
     db.load_dataframe(df, case["table_name"])
-    schema = profile_dataframe(df, case["table_name"])
 
     start = time.time()
     error: Optional[str] = None
     agent_output: dict = {}
     try:
-        result = run_analysis(case["question"], schema, db, df)
+        # schema=None: the graph's schema node profiles the table.
+        result = run_analysis(case["question"], None, db, df)
         agent_output = {
             "sql_query": result.get("sql_query"),
             "result_df": result.get("result_df"),

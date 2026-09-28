@@ -14,7 +14,9 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from config import GOOGLE_API_KEY, MODEL_NAME
+from config import MODEL_NAME
+from core import tracing
+from core.llm import current_api_key
 
 
 @dataclass
@@ -245,7 +247,7 @@ def score_narrative_faithfulness(
         from google import genai
         from google.genai import types as genai_types
 
-        client = genai.Client(api_key=GOOGLE_API_KEY)
+        client = genai.Client(api_key=current_api_key())
         prompt = _JUDGE_PROMPT.format(
             question=question,
             result=result_df.head(10).to_string(),
@@ -256,6 +258,7 @@ def score_narrative_faithfulness(
             contents=prompt,
             config=genai_types.GenerateContentConfig(temperature=0.0, max_output_tokens=200),
         )
+        tracing.record_usage(resp, MODEL_NAME)
         text = resp.text.strip()
         if "{" in text:
             text = text[text.index("{") : text.rindex("}") + 1]

@@ -1,113 +1,259 @@
-"""SQLite database connection and query execution.
+"""SQLite database connection and guarded query execution.
 
 Safety model
 ------------
 The Coder agent emits SQL that runs against user data. The LLM is not
 trusted to stay read-only on its own — a prompt-injected CSV or a
-creative rephrasing can steer it toward destructive statements. This
-module enforces a defense-in-depth allow-list *before* handing the
-query to SQLite:
+creative rephrasing can steer it toward destructive statements. Every
+generated query passes three independent layers:
 
-  1. The statement must parse to exactly one SELECT or WITH ... SELECT.
-  2. Blocked keywords (DROP, DELETE, UPDATE, INSERT, ATTACH, PRAGMA,
-     REPLACE, CREATE, ALTER, TRUNCATE, VACUUM) cause a SQLGuardError
-     before execution.
-  3. Results are capped at MAX_QUERY_ROWS.
+  1. **AST validation (sqlglot).** The query must parse, in the
+     engine's dialect, to exactly one statement whose root is a SELECT
+     or a set operation (UNION / INTERSECT / EXCEPT) of SELECTs; CTEs
+     hang off the SELECT. Any DML/DDL/PRAGMA/ATTACH/transaction node
+     *anywhere* in the tree is rejected. Because this works on the
+     parse tree, not on text, string literals and quoted identifiers
+     can't cause false positives (`REPLACE(...)`, a column named
+     "update", `'it''s; fine'`) and comments can't hide anything.
+  2. **Engine-level read-only (sqlite3 authorizer).** While a guarded
+     query runs, SQLite itself denies every action except reads,
+     SELECT, function calls and recursive CTEs. If layer 1 were ever
+     bypassed, writes, ATTACH and PRAGMA still fail inside the engine.
+  3. **Timeout (sqlite3 progress handler).** Long-running queries —
+     e.g. a runaway recursive CTE — are interrupted after
+     QUERY_TIMEOUT_SECONDS.
 
-Tests live in tests/test_database_guard.py.
+Results are capped at MAX_QUERY_ROWS via fetchmany, so a huge result
+never materializes in memory. Tests live in tests/test_sql_guard.py.
 """
 
+from __future__ import annotations
+
+import logging
 import re
 import sqlite3
-import pandas as pd
+import threading
+import time
 from typing import Optional, Tuple
 
-from config import DEFAULT_TABLE_NAME, MAX_QUERY_ROWS
+import pandas as pd
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError, TokenError
+from sqlglot.tokens import TokenType
+
+from config import DEFAULT_TABLE_NAME, MAX_QUERY_ROWS, QUERY_TIMEOUT_SECONDS
+from core.datasource import DataSource
+from core.engine import Engine
+
+# sqlglot logs a warning when it falls back to parsing unknown syntax as
+# a Command; the guard rejects Commands anyway, so the warning is noise.
+logging.getLogger("sqlglot").setLevel(logging.ERROR)
 
 
 class SQLGuardError(ValueError):
-    """Raised when an LLM-generated query fails the allow-list check."""
+    """Raised when an LLM-generated query fails validation."""
 
 
-_BLOCKED_KEYWORDS = (
-    "drop", "delete", "update", "insert", "replace",
-    "attach", "detach", "pragma", "create", "alter",
-    "truncate", "vacuum", "reindex", "exec",
+# Node types that must never appear anywhere in a read-only query.
+_FORBIDDEN_NODES: tuple[type[exp.Expression], ...] = (
+    exp.Insert, exp.Update, exp.Delete, exp.Merge,
+    exp.Create, exp.Drop, exp.Alter, exp.TruncateTable,
+    exp.Command, exp.Pragma, exp.Attach, exp.Detach,
+    exp.Transaction, exp.Commit, exp.Rollback,
+    exp.Set, exp.Use, exp.Copy, exp.Analyze, exp.LoadData,
 )
 
-_ALLOWED_PREFIXES = ("select", "with")
+_ALLOWED_ROOTS: tuple[type[exp.Expression], ...] = (exp.Select, exp.SetOperation)
+
+# Functions that touch the filesystem or load code. DuckDB can read any
+# file the process can (`SELECT * FROM read_csv('/etc/passwd')`); SQLite
+# builds may ship readfile/writefile/load_extension. Blocked in every dialect.
+_FORBIDDEN_FUNCTIONS = frozenset({
+    "read_csv", "read_csv_auto", "read_parquet", "read_json", "read_json_auto",
+    "read_json_objects", "read_ndjson", "read_ndjson_auto", "read_text", "read_blob",
+    "parquet_scan", "csv_scan", "sniff_csv", "glob", "parquet_metadata", "parquet_schema",
+    "load_extension", "readfile", "writefile", "edit", "fts3_tokenizer",
+    "external_query", "ml.predict",
+})
 
 
-def _strip_comments(sql: str) -> str:
-    # Remove -- line comments and /* block */ comments.
-    sql = re.sub(r"--[^\n]*", " ", sql)
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    return sql
+_PATH_LIKE = re.compile(
+    r"[/\\*]|\.(csv|tsv|parquet|json|ndjson|jsonl|txt|gz|zst|xlsx?)$|^[a-z0-9]+://", re.IGNORECASE
+)
 
 
-def _guard(sql: str) -> str:
-    """Return a normalized SELECT, or raise SQLGuardError."""
+def _function_name(node: exp.Expression) -> str | None:
+    if isinstance(node, exp.Anonymous):
+        return node.name.lower()
+    if isinstance(node, exp.Func):
+        return node.sql_name().lower()
+    return None
+
+
+def _trim(sql: str, dialect: str) -> str:
+    """Cut the text after the last real token (trailing `;` and comments)."""
+    tokens = [t for t in sqlglot.tokenize(sql, read=dialect) if t.token_type != TokenType.SEMICOLON]
+    if not tokens:
+        return ""
+    return sql[: tokens[-1].end + 1].strip()
+
+
+def _guard(sql: str, dialect: str = "sqlite") -> str:
+    """Layer 1: return the query text to execute, or raise SQLGuardError."""
     if not sql or not sql.strip():
         raise SQLGuardError("empty query")
 
-    cleaned = _strip_comments(sql).strip().rstrip(";").strip()
-    if not cleaned:
-        raise SQLGuardError("empty query after stripping comments")
+    try:
+        statements = [s for s in sqlglot.parse(sql, read=dialect) if s is not None]
+        trimmed = _trim(sql, dialect)
+    except (ParseError, TokenError) as e:
+        raise SQLGuardError(f"could not parse query: {str(e).splitlines()[0]}") from e
 
-    # Reject multi-statements — any remaining semicolon means 2+ statements.
-    if ";" in cleaned:
+    if not statements or not trimmed:
+        raise SQLGuardError("empty query after removing comments")
+    if len(statements) > 1:
         raise SQLGuardError("multiple statements are not allowed")
 
-    head = cleaned.split(None, 1)[0].lower()
-    if head not in _ALLOWED_PREFIXES:
-        raise SQLGuardError(f"only SELECT/WITH queries are allowed (got '{head}')")
+    root = statements[0]
+    if not isinstance(root, _ALLOWED_ROOTS):
+        raise SQLGuardError(f"only SELECT queries are allowed (got {root.key.upper()})")
 
-    # Word-boundary keyword scan so "DROPPING" inside a string literal
-    # doesn't false-positive, but "DROP TABLE" does.
-    lowered = cleaned.lower()
-    # Mask single-quoted string literals so keywords inside strings pass.
-    masked = re.sub(r"'[^']*'", "''", lowered)
-    for kw in _BLOCKED_KEYWORDS:
-        if re.search(rf"\b{kw}\b", masked):
-            raise SQLGuardError(f"blocked keyword: {kw.upper()}")
+    for node in root.walk():
+        if isinstance(node, _FORBIDDEN_NODES):
+            raise SQLGuardError(f"forbidden operation in query: {node.key.upper()}")
+        fname = _function_name(node)
+        if fname in _FORBIDDEN_FUNCTIONS:
+            raise SQLGuardError(f"forbidden function in query: {fname}()")
+        # DuckDB reads `FROM 'data.csv'` as a file; after parsing it looks like
+        # a quoted table name, so reject names that look like paths or URLs.
+        if isinstance(node, exp.Table) and _PATH_LIKE.search(node.name or ""):
+            raise SQLGuardError("reading files by path is not allowed")
 
-    return cleaned
+    return trimmed
 
 
-class Database:
-    """Manages an in-memory SQLite database for uploaded data."""
+# ── Layer 2: engine-level read-only ─────────────────────────────────────
 
-    def __init__(self):
-        self.conn = sqlite3.connect(":memory:", check_same_thread=False)
-        self.table_name = DEFAULT_TABLE_NAME
+_ALLOWED_ACTIONS = {
+    sqlite3.SQLITE_SELECT,
+    sqlite3.SQLITE_READ,
+    sqlite3.SQLITE_FUNCTION,
+    sqlite3.SQLITE_RECURSIVE,
+}
+_DENIED_FUNCTIONS = {"load_extension", "fts3_tokenizer", "readfile", "writefile", "edit"}
+
+
+def _read_only_authorizer(action, arg1, arg2, db_name, trigger):
+    if action not in _ALLOWED_ACTIONS:
+        return sqlite3.SQLITE_DENY
+    # For SQLITE_FUNCTION, arg2 is the function name.
+    if action == sqlite3.SQLITE_FUNCTION and (arg2 or "").lower() in _DENIED_FUNCTIONS:
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+class Database(Engine):
+    """A SQLite database the Coder queries: in-memory uploads or a file."""
+
+    dialect = "sqlite"
+
+    def __init__(self, conn: Optional[sqlite3.Connection] = None, name: str = "workspace"):
+        self.conn = conn or sqlite3.connect(":memory:", check_same_thread=False)
+        self.name = name
+        self.table_name = DEFAULT_TABLE_NAME  # primary table (first loaded)
+        self.timeout_seconds = QUERY_TIMEOUT_SECONDS
+        self.max_rows = MAX_QUERY_ROWS
+        # One connection, many threads (API conversations share a workspace).
+        # All access is serialized: sqlite3's progress/authorizer callbacks
+        # need the GIL while holding the connection mutex, so concurrent use
+        # of one connection can deadlock (found by the P4 load test).
+        self._lock = threading.RLock()
+        self._datasource: Optional[DataSource] = None
+        self._loaded_any = False
+
+    @classmethod
+    def from_sqlite(
+        cls, path: str, name: Optional[str] = None, datasource: Optional[DataSource] = None
+    ) -> "Database":
+        """Open an existing SQLite file read-only (e.g. a Spider/BIRD db).
+
+        Pass a pre-built `datasource` to skip introspection when many
+        connections share one database (benchmark runs).
+        """
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+        # Spider/BIRD contain non-UTF-8 text in a few databases.
+        conn.text_factory = lambda b: b.decode(errors="replace")
+        db = cls(conn=conn, name=name or path)
+        db._datasource = datasource
+        tables = db.datasource().table_names
+        if tables:
+            db.table_name = tables[0]
+        return db
 
     def load_dataframe(self, df: pd.DataFrame, table_name: Optional[str] = None):
-        """Load a DataFrame into the SQLite database."""
-        if table_name:
-            self.table_name = table_name
-        # Clean column names for SQL compatibility
-        clean_df = df.copy()
-        clean_df.to_sql(self.table_name, self.conn, if_exists="replace", index=False)
+        """Load a DataFrame as a table. The first table loaded is the primary one."""
+        name = table_name or self.table_name
+        if not self._loaded_any:
+            self.table_name = name
+            self._loaded_any = True
+        with self._lock:
+            df.to_sql(name, self.conn, if_exists="replace", index=False)
+            self._datasource = None
 
-    def execute_query(self, sql: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-        """Execute a read-only SQL query and return results or error.
+    def datasource(self) -> DataSource:
+        """Describe every table currently loaded (cached until the next load)."""
+        with self._lock:
+            if self._datasource is None:
+                self._datasource = DataSource.from_sqlite_conn(self.conn, name=self.name)
+            return self._datasource
 
-        Runs the query through the SQL allow-list first (see module
-        docstring). Any mutation, DDL, or multi-statement input is
-        rejected with a clear error that the Coder agent can use to
-        self-correct on retry.
+    def execute_query(self, sql: str, max_rows: Optional[int] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        """Execute a read-only SQL query and return (result, error).
+
+        Errors are returned as strings (not raised) so the Coder agent can
+        feed them back to the LLM and self-correct on retry.
         """
         try:
-            safe_sql = _guard(sql)
+            safe_sql = _guard(sql, self.dialect)
         except SQLGuardError as e:
             return None, f"SQLGuardError: {e}"
+
+        deadline = time.monotonic() + self.timeout_seconds
+        timed_out = False
+
+        def _progress():
+            nonlocal timed_out
+            if time.monotonic() > deadline:
+                timed_out = True
+                return 1  # non-zero aborts the statement
+            return 0
+
+        with self._lock:
+            return self._run_guarded(safe_sql, _progress, lambda: timed_out, max_rows or self.max_rows)
+
+    def _run_guarded(self, safe_sql, progress, timed_out, max_rows):
+        self.conn.set_authorizer(_read_only_authorizer)
+        self.conn.set_progress_handler(progress, 10_000)
         try:
-            result = pd.read_sql(safe_sql, self.conn)
-            if len(result) > MAX_QUERY_ROWS:
-                result = result.head(MAX_QUERY_ROWS)
-            return result, None
+            cur = self.conn.execute(safe_sql)
+            columns = [d[0] for d in cur.description or []]
+            rows = cur.fetchmany(max_rows)
+            cur.close()
+            return pd.DataFrame.from_records(rows, columns=columns), None
+        except sqlite3.DatabaseError as e:
+            if timed_out():
+                return None, f"QueryTimeout: query exceeded {self.timeout_seconds}s and was interrupted"
+            return None, str(e)
         except Exception as e:
             return None, str(e)
+        finally:
+            self.conn.set_authorizer(None)
+            self.conn.set_progress_handler(None, 0)
+
+    def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:
+        with self._lock:
+            return self.conn.execute(sql, params).fetchall()
 
     def close(self):
         """Close the database connection."""

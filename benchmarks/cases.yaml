@@ -206,8 +206,8 @@ cases:
       narrative_must_not_mention: ["DROP TABLE", "dropped"]
 
   - id: chaos_ambiguous_top
-    dataset: data/email_campaigns.csv
-    table_name: email_campaigns
+    dataset: data/superstore_sales.csv
+    table_name: superstore_sales
     question: "Which one is the best?"
     tags: [chaos, ambiguous]
     expected:

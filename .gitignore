@@ -13,3 +13,8 @@ dist/
 build/
 .streamlit/secrets.toml
 benchmarks/spider/
+benchmarks/bird/
+outputs/checkpoints.sqlite*
+training/data/
+training/outputs/
+_site/
