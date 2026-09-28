@@ -1,6 +1,5 @@
-"""Coder Agent - SQL/Python code generation and execution."""
+"""Coder Agent - SQL generation, guarded execution and self-repair."""
 
-import json
 import re
 from google import genai
 from google.genai import types as genai_types
@@ -15,6 +14,7 @@ from config import (
     MAX_RETRY_ATTEMPTS,
 )
 from core.database import Database
+from core.datasource import DataSource
 from models.analysis_plan import SemanticSchema, CodeResult
 
 
@@ -31,16 +31,15 @@ def _is_quota_error(exc: Exception) -> bool:
     return any(p.lower() in msg for p in _QUOTA_PATTERNS)
 
 
-def _build_sql_prompt(question: str, schema: SemanticSchema) -> str:
-    """Build the prompt for SQL generation."""
-    schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
+def _build_sql_prompt(question: str, datasource: DataSource) -> str:
+    """Build the prompt for SQL generation from every table in the DataSource."""
     system = CODER_AGENT_SYSTEM_PROMPT.format(
-        max_rows=MAX_QUERY_ROWS, table_name=schema.table_name
+        max_rows=MAX_QUERY_ROWS, dialect=datasource.dialect.capitalize()
     )
     return f"""{system}
 
-DATASET SCHEMA:
-{schema_desc}
+DATABASE SCHEMA:
+{datasource.to_prompt()}
 
 USER QUESTION: {question}
 
@@ -69,8 +68,7 @@ def _check_unsupported_functions(sql: str) -> Optional[str]:
         "(SUM(x*y) - SUM(x)*SUM(y)/COUNT(*)) / "
         "(SQRT((SUM(x*x) - SUM(x)*SUM(x)/COUNT(*)) * "
         "(SUM(y*y) - SUM(y)*SUM(y)/COUNT(*)))). "
-        "For stddev use: SQRT(AVG(x*x) - AVG(x)*AVG(x)). "
-        "Do NOT use table aliases. Query directly from the table."
+        "For stddev use: SQRT(AVG(x*x) - AVG(x)*AVG(x))."
     )
 
 
@@ -91,11 +89,11 @@ def _extract_sql(response_text: str) -> str:
     return cleaned.strip()
 
 
-def _generate_sql(question: str, schema: SemanticSchema, error_context: str = "") -> str:
+def _generate_sql(question: str, datasource: DataSource, error_context: str = "") -> str:
     """Generate SQL using Gemini API."""
     client = genai.Client(api_key=GOOGLE_API_KEY)
 
-    prompt = _build_sql_prompt(question, schema)
+    prompt = _build_sql_prompt(question, datasource)
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
 
@@ -284,11 +282,12 @@ def execute_analysis(
                 columns=list(corr_df.columns),
             )
 
+    datasource = db.datasource()
     last_error = ""
     last_sql = ""
     for attempt in range(MAX_RETRY_ATTEMPTS):
         try:
-            sql = _generate_sql(question, schema, error_context=last_error)
+            sql = _generate_sql(question, datasource, error_context=last_error)
             last_sql = sql
 
             unsupported = _check_unsupported_functions(sql)
@@ -324,41 +323,3 @@ def execute_analysis(
         success=False,
         error=f"Failed after {MAX_RETRY_ATTEMPTS} attempts. Last error: {last_error}",
     )
-
-
-def generate_python_code(
-    question: str, schema: SemanticSchema, context: str = ""
-) -> str:
-    """Generate Python analysis code for complex tasks that can't be done in SQL."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-
-    schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
-    prompt = f"""You are a Python data analysis expert. Given a dataset schema and question,
-write Python code using pandas, numpy, scipy, or sklearn.
-
-The DataFrame is available as the variable `df`.
-Store the final result in a variable called `result`.
-
-SCHEMA:
-{schema_desc}
-
-{f"ADDITIONAL CONTEXT: {context}" if context else ""}
-
-QUESTION: {question}
-
-Write ONLY the Python code:"""
-
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=2048,
-        ),
-    )
-
-    text = response.text
-    match = re.search(r"```(?:python)?\s*(.*?)```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
