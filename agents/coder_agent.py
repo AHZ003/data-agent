@@ -16,6 +16,7 @@ from core import tracing
 from core.llm import current_api_key, with_rate_limit_backoff
 from core.database import Database
 from core.datasource import DataSource
+import prompts as prompt_registry
 from models.analysis_plan import SemanticSchema, CodeResult
 
 
@@ -44,19 +45,25 @@ def _is_auth_error(exc: Exception) -> bool:
 
 
 def is_terminal_error(error: str) -> bool:
-    """True when a CodeResult error means retrying cannot help."""
-    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL))
+    """True when a CodeResult error means retrying cannot help.
+
+    A query that needs the user's cost confirmation (BigQuery) is terminal
+    too: the caller must ask, not the LLM.
+    """
+    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL)) or "CostConfirmationRequired" in error
 
 
 # Bump when _build_sql_prompt's layout changes: it is part of the
 # benchmark cache key alongside the prompt file's SHA.
-PROMPT_BUILDER_VERSION = 2
+PROMPT_BUILDER_VERSION = 3
 
 
 def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
     """Build the prompt for SQL generation from the DataSource (+ retrieval context)."""
     system = CODER_AGENT_SYSTEM_PROMPT.format(
-        max_rows=MAX_QUERY_ROWS, dialect=datasource.dialect.capitalize()
+        max_rows=MAX_QUERY_ROWS,
+        dialect=datasource.dialect.capitalize(),
+        dialect_notes=prompt_registry.get(f"dialect_{datasource.dialect}"),
     )
     extra = context.render() if context is not None else ""
     extra = f"\n\n{extra}" if extra else ""
@@ -348,13 +355,15 @@ def generate_and_execute(
             sql = _generate_sql(question, datasource, error_context=last_error, model=model, context=context)
             last_sql = sql
 
-            unsupported = _check_unsupported_functions(sql)
+            unsupported = _check_unsupported_functions(sql) if db.dialect == "sqlite" else None
             if unsupported:
                 last_error = unsupported
                 continue
 
             result_df, error = db.execute_query(sql)
 
+            if error and error.startswith("CostConfirmationRequired"):
+                return None, CodeResult(sql_query=sql, success=False, error=error, attempts=attempt)
             if error:
                 last_error = f"SQL: {sql}\nError: {error}"
                 continue

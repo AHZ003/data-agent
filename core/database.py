@@ -30,6 +30,7 @@ never materializes in memory. Tests live in tests/test_sql_guard.py.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import time
 from typing import Optional, Tuple
@@ -42,6 +43,7 @@ from sqlglot.tokens import TokenType
 
 from config import DEFAULT_TABLE_NAME, MAX_QUERY_ROWS, QUERY_TIMEOUT_SECONDS
 from core.datasource import DataSource
+from core.engine import Engine
 
 # sqlglot logs a warning when it falls back to parsing unknown syntax as
 # a Command; the guard rejects Commands anyway, so the warning is noise.
@@ -62,6 +64,30 @@ _FORBIDDEN_NODES: tuple[type[exp.Expression], ...] = (
 )
 
 _ALLOWED_ROOTS: tuple[type[exp.Expression], ...] = (exp.Select, exp.SetOperation)
+
+# Functions that touch the filesystem or load code. DuckDB can read any
+# file the process can (`SELECT * FROM read_csv('/etc/passwd')`); SQLite
+# builds may ship readfile/writefile/load_extension. Blocked in every dialect.
+_FORBIDDEN_FUNCTIONS = frozenset({
+    "read_csv", "read_csv_auto", "read_parquet", "read_json", "read_json_auto",
+    "read_json_objects", "read_ndjson", "read_ndjson_auto", "read_text", "read_blob",
+    "parquet_scan", "csv_scan", "sniff_csv", "glob", "parquet_metadata", "parquet_schema",
+    "load_extension", "readfile", "writefile", "edit", "fts3_tokenizer",
+    "external_query", "ml.predict",
+})
+
+
+_PATH_LIKE = re.compile(
+    r"[/\\*]|\.(csv|tsv|parquet|json|ndjson|jsonl|txt|gz|zst|xlsx?)$|^[a-z0-9]+://", re.IGNORECASE
+)
+
+
+def _function_name(node: exp.Expression) -> str | None:
+    if isinstance(node, exp.Anonymous):
+        return node.name.lower()
+    if isinstance(node, exp.Func):
+        return node.sql_name().lower()
+    return None
 
 
 def _trim(sql: str, dialect: str) -> str:
@@ -95,6 +121,13 @@ def _guard(sql: str, dialect: str = "sqlite") -> str:
     for node in root.walk():
         if isinstance(node, _FORBIDDEN_NODES):
             raise SQLGuardError(f"forbidden operation in query: {node.key.upper()}")
+        fname = _function_name(node)
+        if fname in _FORBIDDEN_FUNCTIONS:
+            raise SQLGuardError(f"forbidden function in query: {fname}()")
+        # DuckDB reads `FROM 'data.csv'` as a file; after parsing it looks like
+        # a quoted table name, so reject names that look like paths or URLs.
+        if isinstance(node, exp.Table) and _PATH_LIKE.search(node.name or ""):
+            raise SQLGuardError("reading files by path is not allowed")
 
     return trimmed
 
@@ -119,7 +152,7 @@ def _read_only_authorizer(action, arg1, arg2, db_name, trigger):
     return sqlite3.SQLITE_OK
 
 
-class Database:
+class Database(Engine):
     """A SQLite database the Coder queries: in-memory uploads or a file."""
 
     dialect = "sqlite"
@@ -205,6 +238,9 @@ class Database:
         finally:
             self.conn.set_authorizer(None)
             self.conn.set_progress_handler(None, 0)
+
+    def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:
+        return self.conn.execute(sql, params).fetchall()
 
     def close(self):
         """Close the database connection."""

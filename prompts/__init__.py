@@ -88,6 +88,9 @@ REGISTRY = (
     "storyteller_agent",
     "suggested_questions",
     "vision_extraction",
+    "dialect_sqlite",
+    "dialect_duckdb",
+    "dialect_bigquery",
 )
 
 

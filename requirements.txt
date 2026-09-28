@@ -39,6 +39,8 @@ distro==1.9.0
     # via
     #   google-genai
     #   langsmith
+duckdb==1.5.6
+    # via dataagent
 et-xmlfile==2.0.0
     # via openpyxl
 formulaic==1.2.2

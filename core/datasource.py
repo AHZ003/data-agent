@@ -113,23 +113,24 @@ class DataSource:
               "customer_id" INTEGER -> "customers"."id"
               "region" TEXT -- 4 distinct; e.g. 'West', 'East', 'South'
         """
+        q = (lambda s: f"`{s}`") if self.dialect == "bigquery" else (lambda s: f'"{s}"')
         blocks = []
         for t in self.tables:
             size = f" ({t.row_count:,} rows)" if t.row_count is not None else ""
-            header = f'Table "{t.name}"{size}'
+            header = f"Table {q(t.name)}{size}"
             if len(t.primary_key) > 1:
-                header += " PRIMARY KEY (" + ", ".join(f'"{c}"' for c in t.primary_key) + ")"
+                header += " PRIMARY KEY (" + ", ".join(q(c) for c in t.primary_key) + ")"
             lines = [header]
             fks = {fk.column.lower(): fk for fk in t.foreign_keys}
             # A composite key is shown once on the table line, not per column.
             pk = {c.lower() for c in t.primary_key} if len(t.primary_key) == 1 else set()
             for c in t.columns:
-                line = f'  "{c.name}" {c.type or "ANY"}'
+                line = f"  {q(c.name)} {c.type or 'ANY'}"
                 if c.name.lower() in pk:
                     line += " PRIMARY KEY"
                 fk = fks.get(c.name.lower())
                 if fk:
-                    line += f' -> "{fk.ref_table}"."{fk.ref_column}"'
+                    line += f" -> {q(fk.ref_table)}.{q(fk.ref_column)}"
                 notes = []
                 if c.distinct_count is not None:
                     notes.append(f"{c.distinct_count:,} distinct")
