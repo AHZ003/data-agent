@@ -8,13 +8,13 @@ from google.genai import types as genai_types
 from typing import List
 
 from config import (
-from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     SCHEMA_AGENT_SYSTEM_PROMPT,
     SUGGESTED_QUESTIONS_PROMPT,
     DEFAULT_TABLE_NAME,
 )
+from core import tracing
 from models.analysis_plan import ColumnProfile, ColumnRole, SemanticSchema
 
 _SUGGESTION_CACHE: dict = {}

@@ -8,13 +8,13 @@ import pandas as pd
 from typing import Optional, List
 
 from config import (
-from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     CRITIC_AGENT_SYSTEM_PROMPT,
     CRITIC_CONFIDENCE_THRESHOLD_WARN,
     CRITIC_CONFIDENCE_THRESHOLD_REJECT,
 )
+from core import tracing
 from models.analysis_plan import ValidationReport, ValidationStatus, SemanticSchema
 from models.chart_config import ChartConfig, ChartType
 from core import stats as da_stats
