@@ -13,3 +13,4 @@ dist/
 build/
 .streamlit/secrets.toml
 benchmarks/spider/
+benchmarks/bird/
