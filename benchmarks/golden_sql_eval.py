@@ -32,8 +32,13 @@ from benchmarks.text2sql import (  # noqa: E402
 CACHE_DIR = ROOT / "outputs" / "cache"
 
 
-def load_examples() -> tuple[Path, list[Example], dict[str, list[str]]]:
+def load_examples(include_user: bool = True) -> tuple[Path, list[Example], dict[str, list[str]]]:
+    """Chinook golden cases, plus cases promoted from user feedback (golden_user.yaml)."""
     db, cases = load()
+    user = ROOT / "benchmarks" / "golden_user.yaml"
+    if include_user and user.exists():
+        _, extra = load(user)
+        cases = cases + extra
     examples = [Example(c["id"], "chinook", c["question"], c["gold_sql"], c["difficulty"]) for c in cases]
     return db, examples, {c["id"]: c.get("tags", []) for c in cases}
 

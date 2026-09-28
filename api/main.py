@@ -39,7 +39,8 @@ from pydantic import BaseModel, Field
 
 from agents import orchestrator, storyteller_agent
 from api.auth import RateLimiter, require_key
-from core import audit, faithfulness, pii, resources, tracing
+import feedback
+from core import audit, faithfulness, online_eval, pii, resources, tracing
 from core.demo import SAMPLE_QUESTIONS, load_sample_workspace
 from core.llm import api_key_override
 
@@ -122,6 +123,11 @@ class ResumeRequest(BaseModel):
     answer: str | bool
 
 
+class Feedback(BaseModel):
+    rating: str = Field(pattern="^(up|down)$")
+    comment: str = Field(default="", max_length=2000)
+
+
 class SQLEdit(BaseModel):
     sql: str = Field(min_length=1, max_length=20000)
 
@@ -157,7 +163,7 @@ def _run_stream(run_id: str, graph_input, gemini_key: Optional[str]) -> Iterator
     """Drive the graph for one run, translating node updates into SSE."""
     run = S.runs[run_id]
     config = {"configurable": {"thread_id": run["conversation_id"]}}
-    with api_key_override(gemini_key):
+    with api_key_override(gemini_key), tracing.usage_scope() as usage:
         tracing.new_run(run["question"], dataset=run["datasource_id"])
         try:
             for chunk in S.graph.stream(graph_input, config, stream_mode="updates"):
@@ -198,6 +204,9 @@ def _run_stream(run_id: str, graph_input, gemini_key: Optional[str]) -> Iterator
             audit.record(run_id=run_id, api_key=run["key"], question=run["question"],
                          sql=final.get("sql_query"), engine=engine,
                          status="error" if final.get("error") else "ok")
+            online_eval.maybe_score(
+                run_id, run["question"], final.get("sql_query"), final.get("result_df"), final.get("error"),
+                final.get("validation"), narrative, warning, time.time() - run["started"], usage.cost_usd)
             yield sse("done", {"run_id": run_id, "conversation_id": run["conversation_id"],
                                "error": final.get("error")})
             tracing.end_run(status="ok")
@@ -348,6 +357,26 @@ def edit_sql(run_id: str, edit: SQLEdit, key_name: str = Depends(require_key)):
     return {"result": _preview(df)}
 
 
+@app.post("/v1/runs/{run_id}/feedback")
+def give_feedback(run_id: str, fb: Feedback, key_name: str = Depends(require_key)):
+    """Thumbs up adds the answer to verified query memory; thumbs down queues it
+    for review (python -m feedback.review), where it can become a golden case."""
+    run = S.runs.get(run_id)
+    if run is None or run["key"] != key_name:
+        raise HTTPException(404, "unknown run")
+    if run["status"] != "done":
+        raise HTTPException(409, "feedback is for completed runs")
+    feedback.record(run_id, key_name, fb.rating, run["question"], (run["result"] or {}).get("sql"),
+                    run["datasource_id"], fb.comment)
+    return {"ok": True}
+
+
+@app.get("/v1/alerts")
+def alerts(_: str = Depends(require_key)):
+    from monitoring.alerts import DAY, evaluate
+    return evaluate(online_eval.load(since=time.time() - 8 * DAY))
+
+
 @app.get("/v1/audit")
 def get_audit(limit: int = 100, key_name: str = Depends(require_key)):
     """Audit trail of executed runs. Callers see only their own runs."""
@@ -361,6 +390,7 @@ def metrics(_: str = Depends(require_key)):
     cache = default_cache()
     return {
         **S.counters,
+        "feedback": feedback.stats(),
         "semantic_cache": None if cache is None else {
             "hits": cache.stats.hits, "misses": cache.stats.misses,
             "hit_rate": cache.stats.hit_rate, "usd_saved": cache.stats.usd_saved,
