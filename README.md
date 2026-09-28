@@ -17,7 +17,7 @@ Built with LangGraph + Google Gemini + Streamlit. Seven specialized agents colla
 |--------|-------|
 | **Eval cases** | 18 (12 golden + 6 adversarial chaos); pass rate re-measured after the P0 refactor, see `outputs/eval/report.md` |
 | **Eval dimensions** | 8 per case (execution, SQL keywords, top value, row bounds, chart type, narrative keywords, critic confidence, LLM-judge faithfulness) + 3 chaos-only scorers |
-| **Test suite** | 132 tests, ~3s, no API calls |
+| **Test suite** | 134 tests, ~3s, no API calls |
 | **Latency** | ~6–12s per question end-to-end (Gemini Flash) |
 | **Cost per question** | ~$0.001 (Gemini 2.5 Flash, 15-column dataset) |
 | **SQL guard** | sqlglot AST + sqlite3 authorizer + timeout; 40 tests incl. hypothesis property tests |
@@ -146,7 +146,7 @@ docker compose up -d --build
 |--------|-------------|
 | `make install` | Create `.venv` from `uv.lock` |
 | `make run` | Start the Streamlit app locally |
-| `make test` | Run pytest (132 tests, no API key needed) |
+| `make test` | Run pytest (134 tests, no API key needed) |
 | `make eval-fast` | Run eval harness, rule-based only (needs API key) |
 | `make lock` | Re-lock dependencies and regenerate `requirements.txt` |
 | `make up` / `make down` | Docker compose up/down |
@@ -246,7 +246,7 @@ data-agent/
 ├── scripts/export_graph.py     # Regenerates the README graph from the compiled LangGraph
 ├── models/                     # Pydantic data models
 ├── db/                         # SQLite persistence layer
-├── tests/                      # 132 tests across 15 test files
+├── tests/                      # 134 tests across 15 test files
 │   └── cassettes/              # Stored LLM responses for offline replay
 ├── docs/
 │   ├── postmortems/            # Incident write-ups
@@ -277,7 +277,7 @@ data-agent/
 
 ## CI/CD
 
-- **On every PR:** `pytest` (132 tests, no API key) + rule-based eval gate (`--fail-under 0.75`, skipped if no API key secret)
+- **On every PR:** `pytest` (134 tests, no API key) + rule-based eval gate (`--fail-under 0.75`, skipped if no API key secret)
 - **Nightly:** Full eval with LLM judge, cross-model comparison (optional), artifacts uploaded, summary appended to `eval-history` branch
 - **Docker:** Non-root user (UID 1001), healthcheck, persistent volumes
 

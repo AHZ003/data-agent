@@ -26,9 +26,25 @@ QUOTA_SENTINEL = "QuotaExhausted"
 _QUOTA_PATTERNS = ("RESOURCE_EXHAUSTED", "429", "quota", "rate limit", "rate_limit")
 
 
+# An invalid or unauthorized API key is just as terminal as a quota
+# error: every retry fails the same way.
+AUTH_SENTINEL = "ProviderAuthError"
+_AUTH_PATTERNS = ("API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED", "UNAUTHENTICATED")
+
+
 def _is_quota_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(p.lower() in msg for p in _QUOTA_PATTERNS)
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(p.lower() in msg for p in _AUTH_PATTERNS)
+
+
+def is_terminal_error(error: str) -> bool:
+    """True when a CodeResult error means retrying cannot help."""
+    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL))
 
 
 def _build_sql_prompt(question: str, datasource: DataSource) -> str:
@@ -310,11 +326,12 @@ def execute_analysis(
             return result_df, code_result
 
         except Exception as e:
-            if _is_quota_error(e):
+            if _is_quota_error(e) or _is_auth_error(e):
+                sentinel = QUOTA_SENTINEL if _is_quota_error(e) else AUTH_SENTINEL
                 return None, CodeResult(
                     sql_query="",
                     success=False,
-                    error=f"{QUOTA_SENTINEL}: {e}",
+                    error=f"{sentinel}: {e}",
                 )
             last_error = str(e)
 

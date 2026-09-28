@@ -337,12 +337,11 @@ def should_retry(state: AgentState) -> str:
     """Determine if we should retry after critic rejection.
 
     Retries are bounded by `retry_count` (incremented in coder_node)
-    and are skipped entirely when the coder hit a terminal error such
-    as an LLM quota exhaustion — retrying a 429 storm just amplifies
-    the outage.
+    and are skipped entirely when the coder hit a terminal error (LLM
+    quota exhaustion or an invalid API key) — retrying a 429 storm just
+    amplifies the outage.
     """
-    error = state.get("error") or ""
-    if "QuotaExhausted" in error:
+    if coder_agent.is_terminal_error(state.get("error") or ""):
         return "continue"
 
     validation = state.get("validation", {})
