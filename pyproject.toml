@@ -40,6 +40,9 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.27",
     "opentelemetry-sdk>=1.27",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 
 [dependency-groups]
 dev = [
@@ -47,10 +50,32 @@ dev = [
     "hypothesis>=6.100",
     "httpx>=0.27",
     "opentelemetry-sdk>=1.27",
+    "mcp>=1.2",
 ]
 
+[project.scripts]
+dataagent = "cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Installable from the repo (uv tool install .). Not for PyPI as-is: these
+# are generic top-level names; publishing first needs a `dataagent.` namespace.
+[tool.hatch.build.targets.wheel]
+packages = ["agents", "api", "benchmarks", "core", "feedback", "models", "monitoring",
+            "prompts", "retrieval", "routing", "semantic_layer"]
+only-include = ["agents", "api", "benchmarks", "core", "feedback", "models", "monitoring",
+                "prompts", "retrieval", "routing", "semantic_layer", "cli.py", "config.py",
+                "mcp_server.py", "data/chinook.sqlite"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"cli.py" = "cli.py"
+"config.py" = "config.py"
+"mcp_server.py" = "mcp_server.py"
+
 [tool.uv]
-package = false
+package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

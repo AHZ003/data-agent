@@ -38,7 +38,7 @@ install:
 # requirements.txt is exported from uv.lock for Docker / Streamlit Cloud.
 lock:
 	$(UV) lock
-	$(UV) export --no-hashes --no-dev --format requirements-txt -o requirements.txt
+	$(UV) export --no-hashes --no-dev --no-emit-project --format requirements-txt -o requirements.txt
 
 run:
 	$(RUN) streamlit run app.py
