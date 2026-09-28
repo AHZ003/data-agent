@@ -39,8 +39,9 @@ class Engine(ABC):
         """Describe every queryable table (cached)."""
 
     @abstractmethod
-    def execute_query(self, sql: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
-        """Guarded, read-only execution of untrusted SQL: (result, error)."""
+    def execute_query(self, sql: str, max_rows: Optional[int] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        """Guarded, read-only execution of untrusted SQL: (result, error).
+        Must be safe to call from several threads at once."""
 
     @abstractmethod
     def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:

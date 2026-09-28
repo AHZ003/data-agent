@@ -37,7 +37,6 @@ def test_config_constants_match_registry():
         ("schema_agent", config.SCHEMA_AGENT_SYSTEM_PROMPT),
         ("coder_agent", config.CODER_AGENT_SYSTEM_PROMPT),
         ("planner_agent", config.PLANNER_AGENT_SYSTEM_PROMPT),
-        ("critic_agent", config.CRITIC_AGENT_SYSTEM_PROMPT),
         ("storyteller_agent", config.STORYTELLER_AGENT_SYSTEM_PROMPT),
         ("suggested_questions", config.SUGGESTED_QUESTIONS_PROMPT),
         ("vision_extraction", config.VISION_EXTRACTION_PROMPT),

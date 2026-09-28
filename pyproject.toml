@@ -22,17 +22,26 @@ dependencies = [
     "Pillow>=10.0.0",
     "reportlab>=4.1.0",
     "duckdb>=1.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "langgraph-checkpoint-sqlite>=2.0",
 ]
 
 [project.optional-dependencies]
 bigquery = [
     "google-cloud-bigquery>=3.25",
 ]
+postgres = [
+    "langgraph-checkpoint-postgres>=2.0",
+    "psycopg[binary]>=3.2",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "hypothesis>=6.100",
+    "httpx>=0.27",
 ]
 
 [tool.uv]

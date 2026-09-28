@@ -97,7 +97,7 @@ class DuckDBEngine(Engine):
             self._datasource = _introspect(self, self.name)
         return self._datasource
 
-    def execute_query(self, sql: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def execute_query(self, sql: str, max_rows: Optional[int] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         try:
             safe_sql = _guard(sql, self.dialect)
         except SQLGuardError as e:
@@ -115,7 +115,7 @@ class DuckDBEngine(Engine):
             try:
                 cur = self.conn.execute(safe_sql)
                 columns = [d[0] for d in cur.description or []]
-                rows = cur.fetchmany(self.max_rows)
+                rows = cur.fetchmany(max_rows or self.max_rows)
                 return pd.DataFrame.from_records(rows, columns=columns), None
             except duckdb.Error as e:
                 if timed_out.is_set():

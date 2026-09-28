@@ -99,6 +99,39 @@ Actions → Variables): `GCP_PROJECT_ID`, `GCP_REGION`, `GCP_WIF_PROVIDER`,
 `GCP_DEPLOY_SA`. None of them are secret: without the trust binding above they
 grant nothing. The deploy workflow is skipped until they exist.
 
+## 6. The API service (optional, deployed by the same workflow)
+
+The FastAPI service (`api/main.py`) runs from the same image as a second
+service, `dataagent-api`. It needs two more secrets:
+
+```bash
+# Comma-separated name:key pairs; callers send X-API-Key.
+printf '%s' "alice:$(openssl rand -hex 24)" | gcloud secrets create api-keys --data-file=-
+gcloud secrets add-iam-policy-binding api-keys \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor
+```
+
+Conversations and paused runs (clarifying questions, cost confirmations) live
+in the LangGraph checkpointer. Without further setup each instance uses a local
+SQLite file, so a conversation only survives while it keeps hitting the same
+instance. For durable conversations, create a small Cloud SQL Postgres
+instance and store its DSN:
+
+```bash
+gcloud sql instances create dataagent-pg --database-version=POSTGRES_16 \
+  --edition=ENTERPRISE --tier=db-f1-micro --region=$REGION
+gcloud sql databases create dataagent --instance=dataagent-pg
+gcloud sql users create dataagent --instance=dataagent-pg --password=<strong password>
+printf '%s' "postgresql://dataagent:<password>@/dataagent?host=/cloudsql/${PROJECT_ID}:${REGION}:dataagent-pg" \
+  | gcloud secrets create checkpoint-dsn --data-file=-
+# (grant secretAccessor as above, and add --add-cloudsql-instances to the API deploy)
+```
+
+The deploy workflow picks up `checkpoint-dsn` automatically when it exists. The
+image needs the Postgres extra (`uv sync --extra postgres`); add it to
+`requirements.txt` with `uv export --extra postgres ...` before enabling this.
+
 ## Why these choices
 
 | Choice | Reason |

@@ -84,7 +84,6 @@ REGISTRY = (
     "schema_agent",
     "coder_agent",
     "planner_agent",
-    "critic_agent",
     "storyteller_agent",
     "suggested_questions",
     "vision_extraction",

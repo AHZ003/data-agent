@@ -43,7 +43,8 @@ Return a JSON object with this exact structure:
     {{"agent": "visualizer", "task": "description of chart to create"}},
     {{"agent": "predictor", "task": "description of prediction to make"}},
     {{"agent": "storyteller", "task": "description of narrative to generate"}}
-  ]
+  ],
+  "clarifying_question": null
 }}
 
 Valid agents: coder, visualizer, predictor, critic, storyteller
@@ -97,10 +98,12 @@ Return ONLY the JSON object:"""
         if not steps:
             steps = [PlanStep(agent="coder", task=f"Answer: {question}")]
 
+        clarify = data.get("clarifying_question")
         return AnalysisPlan(
             question=question,
             analysis_types=analysis_types,
             steps=steps,
+            clarifying_question=clarify.strip() if isinstance(clarify, str) and clarify.strip() else None,
         )
     except Exception:
         return _fallback_plan(question)

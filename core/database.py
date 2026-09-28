@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import threading
 import time
 from typing import Optional, Tuple
 
@@ -163,6 +164,11 @@ class Database(Engine):
         self.table_name = DEFAULT_TABLE_NAME  # primary table (first loaded)
         self.timeout_seconds = QUERY_TIMEOUT_SECONDS
         self.max_rows = MAX_QUERY_ROWS
+        # One connection, many threads (API conversations share a workspace).
+        # All access is serialized: sqlite3's progress/authorizer callbacks
+        # need the GIL while holding the connection mutex, so concurrent use
+        # of one connection can deadlock (found by the P4 load test).
+        self._lock = threading.RLock()
         self._datasource: Optional[DataSource] = None
         self._loaded_any = False
 
@@ -191,16 +197,18 @@ class Database(Engine):
         if not self._loaded_any:
             self.table_name = name
             self._loaded_any = True
-        df.to_sql(name, self.conn, if_exists="replace", index=False)
-        self._datasource = None
+        with self._lock:
+            df.to_sql(name, self.conn, if_exists="replace", index=False)
+            self._datasource = None
 
     def datasource(self) -> DataSource:
         """Describe every table currently loaded (cached until the next load)."""
-        if self._datasource is None:
-            self._datasource = DataSource.from_sqlite_conn(self.conn, name=self.name)
-        return self._datasource
+        with self._lock:
+            if self._datasource is None:
+                self._datasource = DataSource.from_sqlite_conn(self.conn, name=self.name)
+            return self._datasource
 
-    def execute_query(self, sql: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def execute_query(self, sql: str, max_rows: Optional[int] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         """Execute a read-only SQL query and return (result, error).
 
         Errors are returned as strings (not raised) so the Coder agent can
@@ -221,16 +229,20 @@ class Database(Engine):
                 return 1  # non-zero aborts the statement
             return 0
 
+        with self._lock:
+            return self._run_guarded(safe_sql, _progress, lambda: timed_out, max_rows or self.max_rows)
+
+    def _run_guarded(self, safe_sql, progress, timed_out, max_rows):
         self.conn.set_authorizer(_read_only_authorizer)
-        self.conn.set_progress_handler(_progress, 10_000)
+        self.conn.set_progress_handler(progress, 10_000)
         try:
             cur = self.conn.execute(safe_sql)
             columns = [d[0] for d in cur.description or []]
-            rows = cur.fetchmany(self.max_rows)
+            rows = cur.fetchmany(max_rows)
             cur.close()
             return pd.DataFrame.from_records(rows, columns=columns), None
         except sqlite3.DatabaseError as e:
-            if timed_out:
+            if timed_out():
                 return None, f"QueryTimeout: query exceeded {self.timeout_seconds}s and was interrupted"
             return None, str(e)
         except Exception as e:
@@ -240,7 +252,8 @@ class Database(Engine):
             self.conn.set_progress_handler(None, 0)
 
     def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:
-        return self.conn.execute(sql, params).fetchall()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchall()
 
     def close(self):
         """Close the database connection."""
