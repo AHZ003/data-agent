@@ -129,16 +129,24 @@ class Database:
         self.name = name
         self.table_name = DEFAULT_TABLE_NAME  # primary table (first loaded)
         self.timeout_seconds = QUERY_TIMEOUT_SECONDS
+        self.max_rows = MAX_QUERY_ROWS
         self._datasource: Optional[DataSource] = None
         self._loaded_any = False
 
     @classmethod
-    def from_sqlite(cls, path: str, name: Optional[str] = None) -> "Database":
-        """Open an existing SQLite file read-only (e.g. a Spider/BIRD db)."""
+    def from_sqlite(
+        cls, path: str, name: Optional[str] = None, datasource: Optional[DataSource] = None
+    ) -> "Database":
+        """Open an existing SQLite file read-only (e.g. a Spider/BIRD db).
+
+        Pass a pre-built `datasource` to skip introspection when many
+        connections share one database (benchmark runs).
+        """
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
         # Spider/BIRD contain non-UTF-8 text in a few databases.
         conn.text_factory = lambda b: b.decode(errors="replace")
         db = cls(conn=conn, name=name or path)
+        db._datasource = datasource
         tables = db.datasource().table_names
         if tables:
             db.table_name = tables[0]
@@ -185,7 +193,7 @@ class Database:
         try:
             cur = self.conn.execute(safe_sql)
             columns = [d[0] for d in cur.description or []]
-            rows = cur.fetchmany(MAX_QUERY_ROWS)
+            rows = cur.fetchmany(self.max_rows)
             cur.close()
             return pd.DataFrame.from_records(rows, columns=columns), None
         except sqlite3.DatabaseError as e:
