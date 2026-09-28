@@ -120,7 +120,7 @@ def test_usage_scope_accumulates_calls_and_cost(trace_path):
         tracing.record_usage(_Resp(0, 1_000_000), "gemini-2.5-flash")
     assert u.calls == 2
     assert u.tokens_in == 1_000_000 and u.tokens_out == 1_000_000
-    assert u.cost_usd == pytest.approx(0.15 + 0.60)
+    assert u.cost_usd == pytest.approx(0.30 + 2.50)
     # Closed scopes stop collecting.
     tracing.record_usage(_Resp(5, 5), "gemini-2.5-flash")
     assert u.calls == 2

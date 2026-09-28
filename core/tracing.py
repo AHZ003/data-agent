@@ -29,14 +29,19 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-# Gemini 2.0 / 2.5 Flash pricing as of 2026. Adjust when Google changes
-# the rate card. Values are USD per 1M tokens.
+# Paid-tier list prices, USD per 1M tokens (<=200k context), from
+# https://ai.google.dev/gemini-api/docs/pricing as of 2026-09-28. Thinking
+# tokens are billed as output. Update this table when Google changes it.
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemini-2.0-flash":      {"in": 0.10, "out": 0.40},
-    "gemini-2.0-flash-exp":  {"in": 0.10, "out": 0.40},
-    "gemini-2.5-flash":      {"in": 0.15, "out": 0.60},
-    "gemini-2.5-pro":        {"in": 1.25, "out": 5.00},
-    "default":               {"in": 0.15, "out": 0.60},
+    "gemini-2.5-flash-lite": {"in": 0.10, "out": 0.40},
+    "gemini-2.5-flash":      {"in": 0.30, "out": 2.50},
+    "gemini-2.5-pro":        {"in": 1.25, "out": 10.00},
+    "gemini-3.1-flash-lite": {"in": 0.25, "out": 1.50},
+    "gemini-3.5-flash-lite": {"in": 0.30, "out": 2.50},
+    "gemini-3.5-flash":      {"in": 1.50, "out": 9.00},
+    "gemini-3.1-pro-preview": {"in": 2.00, "out": 12.00},
+    # Unknown models are priced like 2.5 Flash rather than as free.
+    "default":               {"in": 0.30, "out": 2.50},
 }
 
 
