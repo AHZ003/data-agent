@@ -6,8 +6,9 @@ from google import genai
 from google.genai import types as genai_types
 from typing import List
 
-from config import GOOGLE_API_KEY, MODEL_NAME, PLANNER_AGENT_SYSTEM_PROMPT
+from config import MODEL_NAME, PLANNER_AGENT_SYSTEM_PROMPT
 from core import tracing
+from core.llm import current_api_key
 from models.analysis_plan import (
     AnalysisPlan,
     AnalysisType,
@@ -22,7 +23,7 @@ def create_analysis_plan(
     """
     Classify a question and create a step-by-step analysis plan.
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
 
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 

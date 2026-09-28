@@ -59,3 +59,38 @@ def test_non_rate_limit_errors_are_not_retried():
     with pytest.raises(ValueError):
         with_rate_limit_backoff(call, _is_429, retries=5, sleep=lambda s: None)
     assert len(calls) == 1
+
+
+# ── Per-session API key override ─────────────────────────────────────────
+
+def test_api_key_override_scopes_and_resets(monkeypatch):
+    import config
+    from core.llm import api_key_override, current_api_key
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "server-key")
+    assert current_api_key() == "server-key"
+    with api_key_override("user-key"):
+        assert current_api_key() == "user-key"
+    assert current_api_key() == "server-key"
+    with api_key_override("  "):
+        assert current_api_key() == "server-key"
+
+
+def test_api_key_override_reaches_langgraph_nodes(monkeypatch):
+    """The override must survive LangGraph's node execution."""
+    from typing import TypedDict
+    from langgraph.graph import END, StateGraph
+    import config
+    from core.llm import api_key_override, current_api_key
+    monkeypatch.setattr(config, "GOOGLE_API_KEY", "server-key")
+
+    class S(TypedDict):
+        key: str
+
+    g = StateGraph(S)
+    g.add_node("n", lambda s: {"key": current_api_key()})
+    g.set_entry_point("n")
+    g.add_edge("n", END)
+    app = g.compile()
+    with api_key_override("user-key"):
+        assert app.invoke({"key": ""})["key"] == "user-key"
+        assert [c["n"]["key"] for c in app.stream({"key": ""})] == ["user-key"]

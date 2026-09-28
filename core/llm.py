@@ -16,7 +16,9 @@ from __future__ import annotations
 import os
 import random
 import time
-from typing import Callable, TypeVar
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Callable, Iterator, Optional, TypeVar
 
 T = TypeVar("T")
 
@@ -44,3 +46,25 @@ def with_rate_limit_backoff(
             delay = min(max_delay, base_delay * 2 ** attempt)
             sleep(delay * random.uniform(0.5, 1.0))
     raise AssertionError("unreachable")
+
+
+# ── Per-session API key (bring-your-own-key in the public demo) ─────────
+
+_api_key: ContextVar[Optional[str]] = ContextVar("dataagent_api_key", default=None)
+
+
+def current_api_key() -> str:
+    """The key for this call: a session override, else GOOGLE_API_KEY."""
+    from config import GOOGLE_API_KEY
+    return _api_key.get() or GOOGLE_API_KEY
+
+
+@contextmanager
+def api_key_override(key: Optional[str]) -> Iterator[None]:
+    """Use `key` for every LLM call made in this context (no-op if empty)."""
+    token = _api_key.set(key.strip() if key and key.strip() else None)
+    try:
+        yield
+    finally:
+        _api_key.reset(token)
+
