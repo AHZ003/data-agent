@@ -14,6 +14,7 @@ from config import (
     MAX_RETRY_ATTEMPTS,
 )
 from core import tracing
+from core.llm import with_rate_limit_backoff
 from core.database import Database
 from core.datasource import DataSource
 from models.analysis_plan import SemanticSchema, CodeResult
@@ -106,23 +107,32 @@ def _extract_sql(response_text: str) -> str:
     return cleaned.strip()
 
 
-def _generate_sql(question: str, datasource: DataSource, error_context: str = "") -> str:
+def _generate_sql(
+    question: str,
+    datasource: DataSource,
+    error_context: str = "",
+    model: Optional[str] = None,
+) -> str:
     """Generate SQL using Gemini API."""
     client = genai.Client(api_key=GOOGLE_API_KEY)
+    model = model or MODEL_NAME
 
     prompt = _build_sql_prompt(question, datasource)
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
 
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=1024,
+    response = with_rate_limit_backoff(
+        lambda: client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=1024,
+            ),
         ),
+        is_rate_limit=_is_quota_error,
     )
-    tracing.record_usage(response, MODEL_NAME)
+    tracing.record_usage(response, model)
 
     return _extract_sql(response.text)
 
@@ -300,12 +310,28 @@ def execute_analysis(
                 columns=list(corr_df.columns),
             )
 
+    return generate_and_execute(question, db)
+
+
+def generate_and_execute(
+    question: str,
+    db: Database,
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+    model: Optional[str] = None,
+) -> Tuple[Optional[pd.DataFrame], CodeResult]:
+    """Text-to-SQL with self-repair: generate, guard, execute, retry on error.
+
+    Each failed attempt feeds the SQL and its error back into the next
+    prompt. `max_attempts=1` disables repair (the benchmarks' "single"
+    mode). Quota and auth errors return immediately with a sentinel.
+    This is the whole SQL path — the app and the benchmarks both use it.
+    """
     datasource = db.datasource()
     last_error = ""
     last_sql = ""
-    for attempt in range(MAX_RETRY_ATTEMPTS):
+    for attempt in range(1, max_attempts + 1):
         try:
-            sql = _generate_sql(question, datasource, error_context=last_error)
+            sql = _generate_sql(question, datasource, error_context=last_error, model=model)
             last_sql = sql
 
             unsupported = _check_unsupported_functions(sql)
@@ -319,13 +345,13 @@ def execute_analysis(
                 last_error = f"SQL: {sql}\nError: {error}"
                 continue
 
-            code_result = CodeResult(
+            return result_df, CodeResult(
                 sql_query=sql,
                 success=True,
                 row_count=len(result_df) if result_df is not None else 0,
                 columns=list(result_df.columns) if result_df is not None else [],
+                attempts=attempt,
             )
-            return result_df, code_result
 
         except Exception as e:
             if _is_quota_error(e) or _is_auth_error(e):
@@ -334,11 +360,13 @@ def execute_analysis(
                     sql_query="",
                     success=False,
                     error=f"{sentinel}: {e}",
+                    attempts=attempt,
                 )
             last_error = str(e)
 
     return None, CodeResult(
         sql_query=last_sql,
         success=False,
-        error=f"Failed after {MAX_RETRY_ATTEMPTS} attempts. Last error: {last_error}",
+        error=f"Failed after {max_attempts} attempts. Last error: {last_error}",
+        attempts=max_attempts,
     )

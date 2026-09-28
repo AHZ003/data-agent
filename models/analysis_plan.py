@@ -78,6 +78,7 @@ class CodeResult(BaseModel):
     error: Optional[str] = None
     row_count: int = 0
     columns: List[str] = Field(default_factory=list)
+    attempts: int = 0
 
 
 # --- Critic Agent Models ---
