@@ -92,7 +92,7 @@ class Retriever:
                 if layer is not None:
                     ds = layer.annotate(ds)
                 linker = SchemaLinker(ds, self._embedder) if self.config.schema_k else None
-                values = build(db.conn, ds) if self.config.values else None
+                values = build(db, ds) if self.config.values else None
                 self._per_db[db.name] = (ds, linker, values, layer)
             return self._per_db[db.name]
 

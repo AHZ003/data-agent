@@ -21,6 +21,12 @@ dependencies = [
     "openpyxl>=3.1.0",
     "Pillow>=10.0.0",
     "reportlab>=4.1.0",
+    "duckdb>=1.1",
+]
+
+[project.optional-dependencies]
+bigquery = [
+    "google-cloud-bigquery>=3.25",
 ]
 
 [dependency-groups]

@@ -1,0 +1,62 @@
+# BigQuery golden set over NYC yellow taxi trips (public dataset).
+#
+# STATUS: scaffold, NOT validated. Column names follow the public
+# schema as documented; confirm with
+#   python -m benchmarks.bigquery_eval --check    (dry runs only: free)
+# then run the gold queries once and extend to 30-50 cases.
+#
+# Every gold query filters on pickup_datetime so it stays cheap if the
+# table is partitioned on it; `bytes scanned` is reported per case.
+
+tables:
+  - bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022
+
+cases:
+  - id: bq_001
+    question: How many yellow taxi trips started on January 1st, 2022?
+    gold_sql: SELECT COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) = '2022-01-01'
+    tags: [aggregation, time]
+  - id: bq_002
+    question: What was the average fare amount in March 2022?
+    gold_sql: SELECT AVG(fare_amount) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-03-01' AND '2022-03-31'
+    tags: [aggregation, time]
+  - id: bq_003
+    question: How many trips were there per day in the first week of February 2022? Order by date.
+    gold_sql: SELECT DATE(pickup_datetime) AS d, COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-02-01' AND '2022-02-07' GROUP BY d ORDER BY d
+    tags: [time, breakdown]
+  - id: bq_004
+    question: What share of trips in April 2022 were paid by credit card (payment type 1), as a percentage?
+    gold_sql: SELECT 100 * COUNTIF(payment_type = '1') / COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-04-01' AND '2022-04-30'
+    tags: [ratio]
+  - id: bq_005
+    question: What was the average tip as a percentage of the fare for card-paid trips in May 2022?
+    gold_sql: SELECT 100 * AVG(SAFE_DIVIDE(tip_amount, fare_amount)) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-05-01' AND '2022-05-31' AND payment_type = '1' AND fare_amount > 0
+    tags: [ratio, filter]
+  - id: bq_006
+    question: Which hour of the day had the most pickups in June 2022?
+    gold_sql: SELECT EXTRACT(HOUR FROM pickup_datetime) AS h FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-06-01' AND '2022-06-30' GROUP BY h ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [time, ranking]
+  - id: bq_007
+    question: What were the top 5 pickup location ids by number of trips in July 2022, most first?
+    gold_sql: SELECT pickup_location_id FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-07-01' AND '2022-07-31' GROUP BY pickup_location_id ORDER BY COUNT(*) DESC LIMIT 5
+    tags: [ranking, top_n]
+  - id: bq_008
+    question: What was the average trip distance in miles on weekends versus weekdays in August 2022?
+    gold_sql: SELECT EXTRACT(DAYOFWEEK FROM pickup_datetime) IN (1, 7) AS weekend, AVG(trip_distance) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-08-01' AND '2022-08-31' GROUP BY weekend
+    tags: [comparison, time]
+  - id: bq_009
+    question: What was the median trip duration in minutes in September 2022?
+    gold_sql: SELECT APPROX_QUANTILES(TIMESTAMP_DIFF(dropoff_datetime, pickup_datetime, MINUTE), 100)[OFFSET(50)] FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-09-01' AND '2022-09-30'
+    tags: [aggregation, time]
+  - id: bq_010
+    question: What was the total revenue (total amount) per month in 2022? Order by month.
+    gold_sql: SELECT FORMAT_DATE('%Y-%m', DATE(pickup_datetime)) AS m, SUM(total_amount) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-01-01' AND '2022-12-31' GROUP BY m ORDER BY m
+    tags: [time, breakdown]
+  - id: bq_011
+    question: How many trips in October 2022 had more than 4 passengers?
+    gold_sql: SELECT COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-10-01' AND '2022-10-31' AND passenger_count > 4
+    tags: [filter, aggregation]
+  - id: bq_012
+    question: What was the average fare per mile for trips longer than 1 mile in November 2022?
+    gold_sql: SELECT AVG(fare_amount / trip_distance) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-11-01' AND '2022-11-30' AND trip_distance > 1
+    tags: [ratio, filter]

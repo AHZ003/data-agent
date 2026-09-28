@@ -54,4 +54,10 @@ def test_coder_prompt_still_has_placeholders():
     body = get("coder_agent")
     assert "{dialect}" in body
     assert "{max_rows}" in body
-    body.format(dialect="Sqlite", max_rows=10)
+    assert "{dialect_notes}" in body
+    body.format(dialect="Sqlite", max_rows=10, dialect_notes="")
+
+
+def test_every_engine_dialect_has_notes():
+    for dialect in ("sqlite", "duckdb", "bigquery"):
+        assert get(f"dialect_{dialect}").strip()

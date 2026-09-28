@@ -28,7 +28,7 @@ from retrieval.text import STOPWORDS, char_ngrams
 
 MAX_VALUES_PER_COLUMN = 5000
 MAX_VALUE_LEN = 60
-_TEXT_TYPES = ("CHAR", "TEXT", "CLOB", "VARCHAR", "NVARCHAR", "")
+_TEXT_TYPES = ("CHAR", "TEXT", "CLOB", "VARCHAR", "NVARCHAR", "STRING")
 _WORD = re.compile(r"[\w'.&/-]+", re.UNICODE)
 _QUOTED = re.compile(r"['\"‘’“”]([^'\"‘’“”]{2,60})['\"‘’“”]")
 
@@ -47,20 +47,22 @@ class ValueMatch:
 
 
 class ValueIndex:
-    def __init__(self, conn: sqlite3.Connection, ds: DataSource):
+    def __init__(self, fetch, ds: DataSource):
+        """`fetch(sql, params) -> rows` runs trusted SQL on the engine."""
         self.entries: list[tuple[str, str, str, frozenset]] = []  # table, column, value, trigrams
         self.by_gram: dict[str, list[int]] = {}
         self.exact: dict[str, list[int]] = {}
         for t in ds.tables:
             for c in t.columns:
-                if not c.type.upper().startswith(_TEXT_TYPES) and c.type:
+                if c.type and not c.type.upper().startswith(_TEXT_TYPES):
                     continue
                 if c.distinct_count is not None and t.row_count and c.distinct_count > MAX_VALUES_PER_COLUMN:
                     continue
-                q = f'SELECT DISTINCT "{c.name}" FROM "{t.name}" WHERE "{c.name}" IS NOT NULL LIMIT ?'
+                q = (f'SELECT DISTINCT "{c.name}" FROM "{t.name}" WHERE "{c.name}" IS NOT NULL '
+                     f"LIMIT {MAX_VALUES_PER_COLUMN + 1}")
                 try:
-                    rows = conn.execute(q, (MAX_VALUES_PER_COLUMN + 1,)).fetchall()
-                except sqlite3.Error:
+                    rows = fetch(q, ())
+                except Exception:
                     continue
                 if len(rows) > MAX_VALUES_PER_COLUMN:
                     continue  # identifiers / free text, not filter values
@@ -117,5 +119,9 @@ class ValueIndex:
         return out[:limit]
 
 
-def build(conn: sqlite3.Connection, ds: Optional[DataSource] = None) -> ValueIndex:
-    return ValueIndex(conn, ds or DataSource.from_sqlite_conn(conn))
+def build(source, ds: Optional[DataSource] = None) -> ValueIndex:
+    """Build from an Engine (uses its trusted `fetch`) or a sqlite3 connection."""
+    if isinstance(source, sqlite3.Connection):
+        return ValueIndex(lambda q, p: source.execute(q, p).fetchall(),
+                          ds or DataSource.from_sqlite_conn(source))
+    return ValueIndex(source.fetch, ds or source.datasource())
