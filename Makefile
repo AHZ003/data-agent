@@ -1,4 +1,4 @@
-.PHONY: help install lock run api test eval eval-fast spider-setup spider-eval bird-setup bench bench-spider bench-bird bench-ablate bench-plan bench-oracle bench-golden lint up down logs rebuild ps clean
+.PHONY: help install lock run api test eval eval-fast spider-setup spider-eval bird-setup bench bench-spider bench-bird bench-ablate bench-plan bench-oracle bench-golden redteam redteam-offline lint up down logs rebuild ps clean
 
 help:
 	@echo "DataAgent — common tasks"
@@ -20,6 +20,8 @@ help:
 	@echo "  make bench-bird   BIRD mini-dev, evidence on and off"
 	@echo "  make bench-ablate Run benchmarks/ablations.yaml with CIs + McNemar"
 	@echo "  make bench        bench-spider + bench-bird + bench-ablate"
+	@echo "  make redteam-offline  SQL guard evasion attacks, before vs after (no LLM)"
+	@echo "  make redteam      + data-borne prompt-injection attacks (needs API key)"
 	@echo "  make up        Start Docker stack (build + detach)"
 	@echo "  make down      Stop Docker stack"
 	@echo "  make logs      Tail container logs"
@@ -85,6 +87,12 @@ bench-ablate:
 	$(RUN) python -m benchmarks.ablate
 
 bench: bench-spider bench-bird bench-ablate
+
+redteam-offline:
+	$(RUN) python -m benchmarks.redteam.run --offline
+
+redteam:
+	$(RUN) python -m benchmarks.redteam.run
 
 up:
 	docker compose up -d --build
