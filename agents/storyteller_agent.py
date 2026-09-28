@@ -2,13 +2,10 @@
 
 import json
 import re
-from google import genai
-from google.genai import types as genai_types
 from typing import Iterator, List, Dict, Any, Optional
 
-from config import MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
-from core import injection, tracing
-from core.llm import current_api_key
+from config import STORYTELLER_AGENT_SYSTEM_PROMPT, model_for
+from core import injection, llm
 from models.report import AnalysisReport, ReportSection
 
 
@@ -74,21 +71,12 @@ def generate_narrative(
     prediction_info: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate a plain-English narrative for a single analysis step (blocking)."""
-    client = genai.Client(api_key=current_api_key())
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.3,
-            max_output_tokens=512,
-        ),
-    )
-    tracing.record_usage(response, MODEL_NAME)
-    return response.text.strip()
+    return llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
+                        max_output_tokens=512).strip()
 
 
 def stream_narrative(
@@ -105,27 +93,13 @@ def stream_narrative(
     word-chunker. Callers like `st.write_stream` can consume this
     iterator directly.
     """
-    client = genai.Client(api_key=current_api_key())
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
-    last_chunk = None
     try:
-        for chunk in client.models.generate_content_stream(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=1024,
-            ),
-        ):
-            last_chunk = chunk
-            text = getattr(chunk, "text", None)
-            if text:
-                yield text
-        # Streamed usage metadata is cumulative; the last chunk has the total.
-        tracing.record_usage(last_chunk, MODEL_NAME)
+        yield from llm.generate_stream(prompt, model=model_for("storyteller"), temperature=0.3,
+                                       max_output_tokens=1024)
     except Exception as e:
         yield f"\n\n_Narrative generation encountered an error: {e}_"
 
@@ -141,7 +115,6 @@ def generate_full_report(
     - analyses: list of {question, sql, result_summary, narrative, warnings}
     - predictions: list of prediction results (optional)
     """
-    client = genai.Client(api_key=current_api_key())
 
     analyses = session_data.get("analyses", [])
     predictions = session_data.get("predictions", [])
@@ -187,16 +160,8 @@ Return a JSON object with this structure:
 Return ONLY the JSON:"""
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=2048,
-            ),
-        )
-        tracing.record_usage(response, MODEL_NAME)
-        text = response.text.strip()
+        text = llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
+                            max_output_tokens=2048).strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
             if match:

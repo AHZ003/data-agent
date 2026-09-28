@@ -68,6 +68,7 @@ def test_storyteller_generate_narrative_via_cassette(tmp_path, monkeypatch):
     template changes, the sha shifts and the test flags the drift.
     """
     from agents import storyteller_agent
+    from core import llm
 
     # Point the cassette system at a tmp dir for this test only.
     monkeypatch.setattr(llm_cassette, "CASSETTE_DIR", tmp_path)
@@ -83,12 +84,10 @@ def test_storyteller_generate_narrative_via_cassette(tmp_path, monkeypatch):
     canned = "Central region leads with $1.2M in sales."
     llm_cassette.record("storyteller_topregion", expected_prompt, canned)
 
-    # Swap Client on the agent module so the real function routes to
-    # the cassette. Note: we patch `storyteller_agent.genai.Client`,
-    # not the top-level google.genai — this is the import the agent
-    # actually uses at call time.
+    # Swap Client in the LLM gateway (core/llm.py), the one module that
+    # constructs genai clients, so the real function routes to the cassette.
     monkeypatch.setattr(
-        storyteller_agent.genai,
+        llm.genai,
         "Client",
         lambda api_key=None: llm_cassette.make_replay_client("storyteller_topregion"),
     )
@@ -106,6 +105,7 @@ def test_storyteller_stream_narrative_via_cassette(tmp_path, monkeypatch):
     client yields the full text as one chunk, which is enough to
     exercise the generator plumbing without network."""
     from agents import storyteller_agent
+    from core import llm
 
     monkeypatch.setattr(llm_cassette, "CASSETTE_DIR", tmp_path)
 
@@ -117,7 +117,7 @@ def test_storyteller_stream_narrative_via_cassette(tmp_path, monkeypatch):
     )
     llm_cassette.record("storyteller_stream", expected_prompt, "Profit dropped because X.")
     monkeypatch.setattr(
-        storyteller_agent.genai,
+        llm.genai,
         "Client",
         lambda api_key=None: llm_cassette.make_replay_client("storyteller_stream"),
     )

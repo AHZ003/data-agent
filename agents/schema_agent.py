@@ -3,18 +3,14 @@
 import json
 import pandas as pd
 import numpy as np
-from google import genai
-from google.genai import types as genai_types
 from typing import List
 
 from config import (
-    MODEL_NAME,
-    SCHEMA_AGENT_SYSTEM_PROMPT,
     SUGGESTED_QUESTIONS_PROMPT,
     DEFAULT_TABLE_NAME,
+    model_for,
 )
-from core import tracing
-from core.llm import current_api_key
+from core import llm
 from models.analysis_plan import ColumnProfile, ColumnRole, SemanticSchema
 
 _SUGGESTION_CACHE: dict = {}
@@ -132,22 +128,13 @@ def _suggest_analyses(columns: List[ColumnProfile]) -> List[str]:
 def _generate_suggested_questions(
     schema: SemanticSchema,
 ) -> List[str]:
-    """Use Gemini to generate suggested questions for the dataset."""
-    client = genai.Client(api_key=current_api_key())
+    """Use the LLM to generate suggested questions for the dataset."""
 
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=f"Dataset profile:\n{schema_summary}\n\n{SUGGESTED_QUESTIONS_PROMPT}",
-            config=genai_types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=1024,
-            ),
-        )
-        tracing.record_usage(response, MODEL_NAME)
-        text = response.text.strip()
+        text = llm.generate(f"Dataset profile:\n{schema_summary}\n\n{SUGGESTED_QUESTIONS_PROMPT}",
+                            model=model_for("schema"), temperature=0.7, max_output_tokens=1024).strip()
         # Parse JSON array from response
         if "[" in text:
             json_str = text[text.index("[") : text.rindex("]") + 1]

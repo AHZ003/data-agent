@@ -2,13 +2,10 @@
 
 import json
 import re
-from google import genai
-from google.genai import types as genai_types
 from typing import List
 
-from config import MODEL_NAME, PLANNER_AGENT_SYSTEM_PROMPT
-from core import tracing
-from core.llm import current_api_key
+from config import PLANNER_AGENT_SYSTEM_PROMPT, model_for
+from core import llm
 from models.analysis_plan import (
     AnalysisPlan,
     AnalysisType,
@@ -23,8 +20,6 @@ def create_analysis_plan(
     """
     Classify a question and create a step-by-step analysis plan.
     """
-    client = genai.Client(api_key=current_api_key())
-
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 
     prompt = f"""{PLANNER_AGENT_SYSTEM_PROMPT}
@@ -53,16 +48,8 @@ Valid analysis_types: descriptive, trend, comparison, correlation, prediction, s
 Return ONLY the JSON object:"""
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=1024,
-            ),
-        )
-        tracing.record_usage(response, MODEL_NAME)
-        text = response.text.strip()
+        text = llm.generate(prompt, model=model_for("planner"), temperature=0.0,
+                            max_output_tokens=1024).strip()
     except Exception:
         return _fallback_plan(question)
 

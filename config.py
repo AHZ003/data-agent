@@ -11,6 +11,12 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 # --- Model Configuration ---
 # Override via DATAAGENT_MODEL env var for cross-model eval comparisons.
 MODEL_NAME = os.getenv("DATAAGENT_MODEL", "gemini-2.5-flash")
+
+
+def model_for(agent: str) -> str:
+    """Per-agent model: DATAAGENT_MODEL_<AGENT> (e.g. DATAAGENT_MODEL_CODER=ollama/qwen2.5-coder:7b)."""
+    return os.getenv(f"DATAAGENT_MODEL_{agent.upper()}", MODEL_NAME)
+
 MAX_TOKENS = 4096
 TEMPERATURE = 0.0
 
@@ -36,7 +42,6 @@ MAX_DISPLAY_ROWS = 10
 # callers — they resolve to the file body at import time.
 from prompts import get as _prompt  # noqa: E402
 
-SCHEMA_AGENT_SYSTEM_PROMPT = _prompt("schema_agent")
 CODER_AGENT_SYSTEM_PROMPT = _prompt("coder_agent")
 PLANNER_AGENT_SYSTEM_PROMPT = _prompt("planner_agent")
 STORYTELLER_AGENT_SYSTEM_PROMPT = _prompt("storyteller_agent")

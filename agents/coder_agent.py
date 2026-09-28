@@ -1,19 +1,16 @@
 """Coder Agent - SQL generation, guarded execution and self-repair."""
 
 import re
-from google import genai
-from google.genai import types as genai_types
 import pandas as pd
 from typing import Optional, Tuple
 
 from config import (
-    MODEL_NAME,
+    model_for,
     CODER_AGENT_SYSTEM_PROMPT,
     MAX_QUERY_ROWS,
     MAX_RETRY_ATTEMPTS,
 )
-from core import injection, pii, tracing
-from core.llm import current_api_key, with_rate_limit_backoff
+from core import injection, llm, pii
 from core.database import Database
 from core.datasource import DataSource
 import prompts as prompt_registry
@@ -132,28 +129,13 @@ def _generate_sql(
     model: Optional[str] = None,
     context=None,
 ) -> str:
-    """Generate SQL using Gemini API."""
-    client = genai.Client(api_key=current_api_key())
-    model = model or MODEL_NAME
-
+    """Generate SQL with the configured model (Gemini or a local Ollama model)."""
     prompt = _build_sql_prompt(question, datasource, context)
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
-
-    response = with_rate_limit_backoff(
-        lambda: client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=1024,
-            ),
-        ),
-        is_rate_limit=_is_quota_error,
-    )
-    tracing.record_usage(response, model)
-
-    return _extract_sql(response.text)
+    text = llm.generate(prompt, model=model or model_for("coder"), temperature=0.0,
+                        max_output_tokens=1024, retry_rate_limits=True)
+    return _extract_sql(text)
 
 
 def _pandas_correlation(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
