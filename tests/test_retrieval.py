@@ -93,3 +93,93 @@ def test_value_index_finds_fuzzy_and_exact_matches(chinook):
     fuzzy = idx.match("tracks by Led Zepelin")  # misspelled
     assert any(m.value == "Led Zeppelin" for m in fuzzy)
     assert not any(m.span.lower() == "what" for m in idx.match("What is the total?"))
+
+
+# ── Query memory ─────────────────────────────────────────────────────────
+
+from retrieval.memory import LeakageError, MemoryItem, QueryMemory  # noqa: E402
+
+
+def test_memory_refuses_evaluation_examples():
+    mem = QueryMemory()
+    for bad in ("spider-dev-12", "bird-minidev-3", "chk_001"):
+        with pytest.raises(LeakageError):
+            mem.add(MemoryItem(bad, "q", "SELECT 1", "d", "x"))
+
+
+def test_memory_search_ranks_similar_and_excludes_same_db():
+    mem = QueryMemory(HashingEmbedder())
+    mem.add(MemoryItem("a", "How many singers are there?", "SELECT count(*) FROM singer", "concert", "t"))
+    mem.add(MemoryItem("b", "List the names of all stadiums", "SELECT name FROM stadium", "concert", "t"))
+    mem.add(MemoryItem("c", "How many singers do we have?", "SELECT count(*) FROM singer", "music", "t"))
+    top = mem.search("How many singers exist?", k=2)
+    assert {top[0].id, top[1].id} == {"a", "c"}
+    assert [i.id for i in mem.search("How many singers exist?", k=3, exclude_db="concert")] == ["c"]
+
+
+def test_memory_roundtrip(tmp_path):
+    mem = QueryMemory()
+    mem.add(MemoryItem("a", "q", "SELECT 1", "d", "t"))
+    mem.save(tmp_path / "m.jsonl")
+    assert QueryMemory.load(tmp_path / "m.jsonl").items == mem.items
+
+
+# ── Semantic layer ───────────────────────────────────────────────────────
+
+from semantic_layer import SemanticLayer  # noqa: E402
+
+
+def test_chinook_semantic_layer_is_valid(chinook):
+    _, ds = chinook
+    layer = SemanticLayer.for_datasource("chinook")
+    assert layer.validate(ds) == []
+    assert layer.relevant_metrics("Which artists earned the most?")[0].name == "revenue"
+    annotated = layer.annotate(ds)
+    assert "not what customers paid" in annotated.table("Track").column("UnitPrice").description
+
+
+def test_semantic_layer_validate_catches_unknown_columns(chinook, tmp_path):
+    _, ds = chinook
+    p = tmp_path / "bad.yaml"
+    p.write_text('datasource: x\nmetrics:\n  - {name: m, description: d, sql: \'SUM("Invoice"."Nope")\'}\n'
+                 "columns:\n  Invoice.Missing: d\n")
+    problems = SemanticLayer.load(p).validate(ds)
+    assert len(problems) == 2
+
+
+# ── Retriever through the real coder path ────────────────────────────────
+
+def test_retriever_context_reaches_the_prompt(chinook):
+    from unittest.mock import patch
+
+    from agents import coder_agent
+    from core.database import Database
+    from retrieval.pipeline import RetrievalConfig, Retriever
+
+    path, _ = chinook
+    db = Database.from_sqlite(str(path), name="chinook")
+    mem = QueryMemory()
+    mem.add(MemoryItem("x1", "Total sales per country?", "SELECT country, SUM(amount) FROM sales GROUP BY 1",
+                       "other", "t"))
+    r = Retriever(RetrievalConfig(schema_k=10, values=True, memory_k=1, semantic=True, embedder="hashing"),
+                  memory=mem)
+    prompts = []
+
+    def fake(q, ds, error_context="", model=None, context=None):
+        prompts.append(coder_agent._build_sql_prompt(q, ds, context))
+        return 'SELECT SUM("Total") FROM "Invoice" WHERE "BillingCountry" = \'Germany\''
+
+    with patch.object(coder_agent, "_generate_sql", side_effect=fake):
+        df, res = coder_agent.generate_and_execute("How much revenue did we earn from germany?", db, retriever=r)
+    assert res.success
+    p = prompts[0]
+    assert "\"Invoice\".\"BillingCountry\" contains 'Germany'" in p
+    assert "revenue: Money received" in p
+    assert "Q: Total sales per country?" in p
+    assert 'Table "Playlist"' not in p  # pruned away
+
+
+def test_retrieval_config_from_flags():
+    from retrieval.pipeline import RetrievalConfig
+    assert RetrievalConfig.from_flags({}) is None
+    assert RetrievalConfig.from_flags({"values": True, "unrelated": 1}).values is True

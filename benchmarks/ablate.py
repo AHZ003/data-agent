@@ -82,26 +82,31 @@ def examples_for(run: dict):
 
 
 def compare(runs: list[dict], results: dict[str, list[ExampleResult]]) -> list[dict]:
-    """One row per run: EX + CI, and paired stats vs its benchmark's baseline."""
+    """One row per run: EX + CI, and paired stats vs its baseline.
+
+    The baseline is the run's `baseline:` field if set, else the first run
+    of the same benchmark.
+    """
     rows = []
-    baselines: dict[str, str] = {}
+    first: dict[str, str] = {}
     for run in runs:
-        baselines.setdefault(run["benchmark"], run["name"])
+        first.setdefault(run["benchmark"], run["name"])
+    baselines = {run["name"]: run.get("baseline") or first[run["benchmark"]] for run in runs}
     for run in runs:
         res = results[run["name"]]
         ex_ci = bootstrap_ci([r.match for r in res])
         row = {
             "name": run["name"],
             "benchmark": run["benchmark"],
-            "baseline": baselines[run["benchmark"]],
+            "baseline": baselines[run["name"]],
             "n": len(res),
             "ex": ex_ci.point,
             "ci": [ex_ci.lo, ex_ci.hi],
             "cost_mean": sum(r.cost_usd for r in res) / max(len(res), 1),
             "latency_p95": percentiles([r.latency_s for r in res])["p95"],
         }
-        base_name = baselines[run["benchmark"]]
-        if base_name != run["name"]:
+        base_name = baselines[run["name"]]
+        if base_name != run["name"] and base_name in results:
             base = {r.id: r.match for r in results[base_name]}
             common = [r for r in res if r.id in base]
             a = [base[r.id] for r in common]
@@ -118,14 +123,15 @@ def render(rows: list[dict]) -> str:
     lines = [
         "# Ablations",
         "",
-        "Within each benchmark the first run is the baseline. Δ is paired (same questions); "
+        "Each run is compared with its baseline (the `baseline:` field, else the benchmark's first run). "
+        "Δ is paired (same questions); "
         "p is the exact McNemar test on discordant questions (only-baseline-right vs only-this-right).",
         "",
     ]
     for bench in dict.fromkeys(r["benchmark"] for r in rows):
         lines += [f"## {bench}", "",
-                  "| Config | n | EX | 95% CI | Δ vs baseline | Δ 95% CI | McNemar p | disc. (base/this) | $/q | p95 s |",
-                  "|---|---|---|---|---|---|---|---|---|---|"]
+                  "| Config | n | EX | 95% CI | baseline | Δ | Δ 95% CI | McNemar p | disc. (base/this) | $/q | p95 s |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in (r for r in rows if r["benchmark"] == bench):
             ci = f"{r['ci'][0]:.1%}–{r['ci'][1]:.1%}"
             if "delta" in r:
@@ -135,7 +141,8 @@ def render(rows: list[dict]) -> str:
                 disc = f"{r['only_base']}/{r['only_this']}"
             else:
                 delta = dci = p = disc = "baseline"
-            lines.append(f"| `{r['name']}` | {r['n']} | {r['ex']:.1%} | {ci} | {delta} | {dci} | {p} | "
+            base = f"`{r['baseline']}`" if "delta" in r else "—"
+            lines.append(f"| `{r['name']}` | {r['n']} | {r['ex']:.1%} | {ci} | {base} | {delta} | {dci} | {p} | "
                          f"{disc} | {r['cost_mean']:.5f} | {r['latency_p95']:.1f} |")
         lines.append("")
     return "\n".join(lines)
@@ -153,6 +160,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     runs = load_runs(args.config)
     if args.only:
         wanted = set(args.only.split(","))
+        # Keep the baselines of the selected runs so deltas can be computed.
+        wanted |= {r["baseline"] for r in runs if r["name"] in wanted and r.get("baseline")}
         runs = [r for r in runs if r["name"] in wanted]
 
     if args.plan:

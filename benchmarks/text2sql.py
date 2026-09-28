@@ -83,9 +83,15 @@ class RunConfig:
         from config import MAX_RETRY_ATTEMPTS
         return 1 if self.mode == "single" else MAX_RETRY_ATTEMPTS
 
+    @property
+    def flags(self) -> dict:
+        return dict(self.extra)
+
     def cache_key(self) -> str:
+        from agents.coder_agent import PROMPT_BUILDER_VERSION
         from prompts import version_info
-        payload = asdict(self) | {"coder_prompt": version_info("coder_agent")["sha"]}
+        payload = asdict(self) | {"coder_prompt": version_info("coder_agent")["sha"],
+                                  "prompt_builder": PROMPT_BUILDER_VERSION}
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -178,6 +184,21 @@ class _DataSourceCache:
 
 
 _DS_CACHE = _DataSourceCache()
+_RETRIEVERS: dict[RunConfig, object] = {}
+_RETRIEVER_LOCK = threading.Lock()
+
+
+def retriever_for(cfg: RunConfig):
+    """One Retriever per config (its indexes are shared across examples)."""
+    from retrieval.pipeline import RetrievalConfig, Retriever
+
+    rc = RetrievalConfig.from_flags(cfg.flags)
+    if rc is None:
+        return None
+    with _RETRIEVER_LOCK:
+        if cfg not in _RETRIEVERS:
+            _RETRIEVERS[cfg] = Retriever(rc)
+        return _RETRIEVERS[cfg]
 _GOLD_CACHE: dict[tuple[str, str], tuple[Optional[list[tuple]], Optional[str]]] = {}
 
 
@@ -206,6 +227,7 @@ def run_example(ex: Example, db_path: Path, cfg: RunConfig, rule: str) -> Exampl
     with tracing.usage_scope() as usage:
         result_df, code = generate_and_execute(
             format_question(ex, cfg.evidence), db, max_attempts=cfg.max_attempts, model=cfg.model,
+            retriever=retriever_for(cfg),
         )
     latency = time.time() - start
     db.close()
