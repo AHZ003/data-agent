@@ -1,0 +1,36 @@
+[project]
+name = "dataagent"
+version = "1.0.0"
+description = "Multi-agent text-to-SQL analytics agent (LangGraph + Gemini + Streamlit)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.32.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "plotly>=5.18.0",
+    "google-genai>=1.0.0",
+    "langgraph>=0.2.0",
+    "sqlglot>=25.0.0",
+    "scipy>=1.12.0",
+    "scikit-learn>=1.4.0",
+    "statsmodels>=0.14.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0",
+    "openpyxl>=3.1.0",
+    "Pillow>=10.0.0",
+    "reportlab>=4.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

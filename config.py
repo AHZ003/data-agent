@@ -24,10 +24,6 @@ MAX_RETRY_ATTEMPTS = 3
 CRITIC_CONFIDENCE_THRESHOLD_WARN = 70
 CRITIC_CONFIDENCE_THRESHOLD_REJECT = 40
 
-# --- RAG ---
-CHROMA_COLLECTION_NAME = "statistical_knowledge"
-CHROMA_PERSIST_DIR = "./rag/chroma_db"
-
 # --- File Upload ---
 ALLOWED_FILE_TYPES = ["csv", "xlsx", "xls", "png", "jpg", "jpeg"]
 MAX_DISPLAY_ROWS = 10

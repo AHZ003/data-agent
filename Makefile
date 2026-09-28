@@ -1,9 +1,10 @@
-.PHONY: help install run test eval eval-fast spider-setup spider-eval lint up down logs rebuild ps clean
+.PHONY: help install lock run test eval eval-fast spider-setup spider-eval lint up down logs rebuild ps clean
 
 help:
 	@echo "DataAgent — common tasks"
 	@echo ""
-	@echo "  make install   Install Python dependencies"
+	@echo "  make install   Install locked dependencies with uv (creates .venv)"
+	@echo "  make lock      Re-lock deps and regenerate requirements.txt"
 	@echo "  make run       Run Streamlit locally"
 	@echo "  make test      Run pytest suite"
 	@echo "  make eval      Run benchmark eval (LLM judge on)"
@@ -17,26 +18,34 @@ help:
 	@echo "  make ps        Show container status"
 	@echo "  make clean     Remove caches and build artifacts"
 
+UV ?= uv
+RUN := $(UV) run
+
 install:
-	pip install -r requirements.txt
+	$(UV) sync
+
+# requirements.txt is exported from uv.lock for Docker / Streamlit Cloud.
+lock:
+	$(UV) lock
+	$(UV) export --no-hashes --no-dev --format requirements-txt -o requirements.txt
 
 run:
-	streamlit run app.py
+	$(RUN) streamlit run app.py
 
 test:
-	pytest tests/ -q
+	$(RUN) pytest tests/ -q
 
 eval:
-	python -m benchmarks.runner
+	$(RUN) python -m benchmarks.runner
 
 eval-fast:
-	python -m benchmarks.runner --no-judge
+	$(RUN) python -m benchmarks.runner --no-judge
 
 spider-setup:
 	bash benchmarks/spider_setup.sh
 
 spider-eval:
-	python -m benchmarks.spider_eval --limit 50
+	$(RUN) python -m benchmarks.spider_eval --limit 50
 
 up:
 	docker compose up -d --build
