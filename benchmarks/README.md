@@ -15,8 +15,8 @@ harness gives every change a regression check.
 
 ```
 benchmarks/
-├── cases.yaml      # 12 golden (dataset, question, expected) tuples
-├── scorers.py      # 7 scoring dimensions + LLM-as-judge
+├── cases.yaml      # 18 cases: 12 golden + 6 adversarial chaos
+├── scorers.py      # 7 rule-based dimensions + LLM-as-judge, 3 chaos-only scorers
 ├── runner.py       # CLI: load cases → run crew → aggregate → report
 └── README.md       # this file
 ```

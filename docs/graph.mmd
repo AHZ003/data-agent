@@ -1,0 +1,30 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	schema(schema)
+	planner(planner)
+	coder(coder)
+	critic(critic)
+	visualizer(visualizer)
+	predictor(predictor)
+	storyteller(storyteller)
+	decide_predict(decide_predict)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> schema;
+	coder --> visualizer;
+	critic -. &nbsp;retry&nbsp; .-> coder;
+	critic -. &nbsp;continue&nbsp; .-> decide_predict;
+	decide_predict -.-> predictor;
+	decide_predict -.-> storyteller;
+	planner --> coder;
+	predictor --> storyteller;
+	schema --> planner;
+	visualizer --> critic;
+	storyteller --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

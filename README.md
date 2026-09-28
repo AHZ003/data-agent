@@ -15,12 +15,12 @@ Built with LangGraph + Google Gemini + Streamlit. Seven specialized agents colla
 
 | Metric | Value |
 |--------|-------|
-| **Eval pass rate** | 12/12 golden cases, 18 total (incl. 6 adversarial chaos cases) |
-| **Eval dimensions** | 8 scorers — SQL keywords, top-value accuracy, row bounds, chart type, narrative faithfulness (LLM judge), critic confidence, chaos robustness |
-| **Test suite** | 99 tests, 0 failures, ~3s (no API calls) |
+| **Eval cases** | 18 (12 golden + 6 adversarial chaos); pass rate re-measured after the P0 refactor, see `outputs/eval/report.md` |
+| **Eval dimensions** | 8 per case (execution, SQL keywords, top value, row bounds, chart type, narrative keywords, critic confidence, LLM-judge faithfulness) + 3 chaos-only scorers |
+| **Test suite** | 132 tests, ~3s, no API calls |
 | **Latency** | ~6–12s per question end-to-end (Gemini Flash) |
 | **Cost per question** | ~$0.001 (Gemini 2.5 Flash, 15-column dataset) |
-| **SQL injection guard** | 17 tests covering allow-list, comment stripping, string-literal masking |
+| **SQL guard** | sqlglot AST + sqlite3 authorizer + timeout; 40 tests incl. hypothesis property tests |
 | **Tracing** | Structured JSONL — per-span token/cost accounting, queryable by run_id |
 
 > *Run `make eval-fast` to reproduce. Results stamped with model + prompt versions for reproducibility.*
@@ -29,43 +29,53 @@ Built with LangGraph + Google Gemini + Streamlit. Seven specialized agents colla
 
 ## Architecture
 
+<!-- GRAPH:BEGIN -->
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	schema(schema)
+	planner(planner)
+	coder(coder)
+	critic(critic)
+	visualizer(visualizer)
+	predictor(predictor)
+	storyteller(storyteller)
+	decide_predict(decide_predict)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> schema;
+	coder --> visualizer;
+	critic -. &nbsp;retry&nbsp; .-> coder;
+	critic -. &nbsp;continue&nbsp; .-> decide_predict;
+	decide_predict -.-> predictor;
+	decide_predict -.-> storyteller;
+	planner --> coder;
+	predictor --> storyteller;
+	schema --> planner;
+	visualizer --> critic;
+	storyteller --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
 ```
-User Question
-     │
-     ▼
-┌──────────┐     ┌──────────┐     ┌──────────┐
-│  Schema  │────▶│ Planner  │────▶│  Coder   │◄──┐
-│  Agent   │     │  Agent   │     │  Agent   │   │ retry (max 3)
-└──────────┘     └──────────┘     └────┬─────┘   │
-                                       │         │
-                                  ┌────▼─────┐   │
-                                  │Visualizer│   │
-                                  │  Agent   │   │
-                                  └────┬─────┘   │
-                                       │         │
-                                  ┌────▼─────┐   │
-                                  │  Critic  │───┘
-                                  │  Agent   │ (reject → retry, validate → continue)
-                                  └────┬─────┘
-                                       │
-                              ┌────────┴────────┐
-                              ▼                  ▼
-                        ┌──────────┐      ┌──────────┐
-                        │Predictor │      │  Story-  │
-                        │  Agent   │─────▶│  teller  │
-                        └──────────┘      └──────────┘
-```
+<!-- GRAPH:END -->
 
-The orchestrator is a **LangGraph StateGraph** with conditional edges. The critic-to-coder retry loop is bounded (`retry_count` incremented per entry, capped at 3) and short-circuits on terminal errors (quota exhaustion). See the [postmortem](docs/postmortems/2026-04-13_eval_findings.md) for how we found and fixed the infinite-loop bug that this architecture prevented.
+_Generated from the compiled graph by `scripts/export_graph.py`; CI fails if it drifts._
+
+The orchestrator is a **LangGraph StateGraph** with conditional edges. Order: schema → planner → coder → visualizer → critic, then an optional predictor and the storyteller. The critic-to-coder retry loop is bounded (`retry_count` incremented per entry, capped at 3) and short-circuits on terminal errors (quota exhaustion). See the [postmortem](docs/postmortems/2026-04-13_eval_findings.md) for how we found and fixed the infinite-loop bug that this architecture prevented.
 
 ### Agent responsibilities
 
 | Agent | What it does | Key design decision |
 |-------|-------------|-------------------|
-| **Schema** | Profiles columns as dimension / measure / time_axis / identifier | Pure heuristic, no LLM call — fast and deterministic |
+| **Schema** | Profiles columns as dimension / measure / time_axis / identifier | Pure heuristic, no LLM call; reuses the profile the UI computed on upload |
 | **Planner** | Classifies question type (descriptive, trend, comparison, prediction, anomaly, segmentation) | Single LLM call; output is a structured `AnalysisPlan` |
-| **Coder** | Generates SQLite SQL, executes against in-memory DB, self-corrects on errors | 3 internal retries; quota errors short-circuit immediately |
-| **Visualizer** | Auto-selects chart type and renders Plotly figures | LLM picks the config, deterministic code renders the chart |
+| **Coder** | Generates SQL over every table in the workspace (joins via foreign keys), executes it behind a 3-layer guard, self-corrects on errors | Prompt rendered from a `DataSource` (tables, keys, sample values); 3 internal retries; quota errors short-circuit |
+| **Visualizer** | Auto-selects chart type and renders Plotly figures | Rule-based on result shape and question keywords, no LLM call |
 | **Critic** | Validates statistical rigor — IQR outliers, skewness, sample-size, correlation strength | Scipy-backed (`core/stats.py`), not just heuristics |
 | **Predictor** | Holt-Winters forecasting, K-Means clustering, IQR anomaly detection | Runs only when the Planner classifies the question as prediction/segmentation/anomaly |
 | **Storyteller** | Generates executive-ready narrative with real-time Gemini streaming | Token-by-token output via `generate_content_stream`; graph node is skippable to avoid 2× cost |
@@ -85,8 +95,12 @@ Every agent node emits a JSONL span with `run_id`, `agent_name`, `duration_ms`, 
 ### 3. Versioned prompt registry (`prompts/`)
 Prompts live as individual Markdown files with YAML frontmatter (name, version, description). Content-addressed via SHA-256 hash. Every eval run records the exact prompt versions used, so a regression can be tied to a specific prompt change — not just a git sha.
 
-### 4. SQL injection prevention (`core/database.py`)
-Keyword allow-list guard with comment stripping and string-literal masking. 17 tests covering direct injection, comment-based bypass, UNION attacks, and encoded payloads. The guard raises `SQLGuardError` before any SQL reaches the engine.
+### 4. Three-layer SQL guard (`core/database.py`)
+1. **AST validation (sqlglot):** exactly one statement whose root is a SELECT or set operation; any DML/DDL/PRAGMA/ATTACH node anywhere in the tree is rejected. Parsing instead of regex means `REPLACE(...)`, a column named `"update"` and `'it''s; fine'` are no longer false positives.
+2. **Engine-level read-only (sqlite3 authorizer):** while a generated query runs, SQLite denies everything except reads, so writes fail in the engine even if layer 1 is bypassed.
+3. **Timeout (progress handler):** runaway queries such as unbounded recursive CTEs are interrupted.
+
+Hypothesis property tests check that random SELECTs always pass and random DML is always rejected.
 
 ### 5. VCR-style LLM test cassettes (`core/llm_cassette.py`)
 Record/replay system for Gemini calls so tests run offline, deterministically, with no API key. Prompt → SHA → stored response. Tests monkey-patch `genai.Client` through the cassette, driving the real agent code path end-to-end with no network.
@@ -111,13 +125,11 @@ Not "sample size small, be careful" — actual Tukey fences for outlier detectio
 git clone https://github.com/AHZ003/data-agent.git
 cd data-agent
 
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
+make install           # uv sync: creates .venv from uv.lock
 cp .env.example .env   # set GOOGLE_API_KEY=...
 
-python data/generate_sample_data.py   # optional: 3 sample CSVs
-streamlit run app.py
+uv run python data/generate_sample_data.py   # optional: 3 sample CSVs
+make run
 ```
 
 ### Docker
@@ -132,9 +144,11 @@ docker compose up -d --build
 
 | Target | What it does |
 |--------|-------------|
+| `make install` | Create `.venv` from `uv.lock` |
 | `make run` | Start the Streamlit app locally |
-| `make test` | Run pytest (99 tests, no API key needed) |
+| `make test` | Run pytest (132 tests, no API key needed) |
 | `make eval-fast` | Run eval harness, rule-based only (needs API key) |
+| `make lock` | Re-lock dependencies and regenerate `requirements.txt` |
 | `make up` / `make down` | Docker compose up/down |
 
 ---
@@ -217,7 +231,8 @@ data-agent/
 │   ├── critic_agent.py         # Statistical validation (scipy-backed)
 │   └── storyteller_agent.py    # Narrative generation (blocking + streaming)
 ├── core/
-│   ├── database.py             # SQLite engine + SQL injection guard
+│   ├── database.py             # SQLite engine + 3-layer SQL guard
+│   ├── datasource.py           # Multi-table schema (keys, samples) the Coder prompt is built from
 │   ├── tracing.py              # Structured JSONL tracing + cost accounting
 │   ├── stats.py                # Scipy stat helpers (IQR, skew, Cohen's d, pearsonr)
 │   ├── llm_cassette.py         # VCR-style record/replay for offline tests
@@ -226,11 +241,12 @@ data-agent/
 ├── prompts/                    # Versioned prompt files (Markdown + YAML frontmatter)
 ├── benchmarks/
 │   ├── cases.yaml              # 18 golden + chaos eval cases
-│   ├── scorers.py              # 11 scoring functions
+│   ├── scorers.py              # 8 per-case dimensions + 3 chaos-only scorers
 │   └── runner.py               # CLI harness with --model, --compare
+├── scripts/export_graph.py     # Regenerates the README graph from the compiled LangGraph
 ├── models/                     # Pydantic data models
 ├── db/                         # SQLite persistence layer
-├── tests/                      # 99 tests across 13 test files
+├── tests/                      # 132 tests across 15 test files
 │   └── cassettes/              # Stored LLM responses for offline replay
 ├── docs/
 │   ├── postmortems/            # Incident write-ups
@@ -238,7 +254,8 @@ data-agent/
 ├── .github/workflows/
 │   ├── ci.yml                  # pytest + gated eval on PR
 │   └── nightly-eval.yml        # Scheduled full eval + longitudinal tracking
-├── Dockerfile                  # Multi-stage, non-root
+├── pyproject.toml, uv.lock     # Dependencies (requirements.txt is exported from the lock)
+├── Dockerfile                  # Non-root, healthcheck
 ├── docker-compose.yml          # Persistent volumes for DB + traces
 └── Makefile                    # run, test, eval-fast, up, down
 ```
@@ -260,15 +277,15 @@ data-agent/
 
 ## CI/CD
 
-- **On every PR:** `pytest` (99 tests, no API key) + rule-based eval gate (`--fail-under 0.75`, skipped if no API key secret)
+- **On every PR:** `pytest` (132 tests, no API key) + rule-based eval gate (`--fail-under 0.75`, skipped if no API key secret)
 - **Nightly:** Full eval with LLM judge, cross-model comparison (optional), artifacts uploaded, summary appended to `eval-history` branch
-- **Docker:** Multi-stage build, non-root user (UID 1001), healthcheck, persistent volumes
+- **Docker:** Non-root user (UID 1001), healthcheck, persistent volumes
 
 ---
 
 ## Security
 
-- SQL injection guard: keyword allow-list + comment stripping + string-literal masking (17 tests)
+- SQL guard: sqlglot AST allow-list + sqlite3 read-only authorizer + query timeout
 - Uploads capped at 50 MB / 500k rows
 - `GOOGLE_API_KEY` read from environment only — never committed
 - Docker container runs as non-root (UID 1001)

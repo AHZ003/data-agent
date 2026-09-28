@@ -55,6 +55,37 @@ class AgentState(TypedDict):
 
 # --- Agent Node Functions ---
 
+def schema_node(state: AgentState) -> AgentState:
+    """Run the Schema Agent: profile the primary table's columns.
+
+    Callers that already profiled the dataset (the UI does so on upload
+    to render the profile) pass it in and the node reuses it; otherwise
+    it profiles `df` here. No LLM call either way.
+    """
+    start = time.time()
+    reused = state.get("schema") is not None
+    with tracing.span("schema") as _t:
+        if not reused:
+            db = state["db"]
+            schema = schema_agent.profile_dataframe(
+                state["df"], db.table_name, suggest_questions=False,
+            )
+            state["schema"] = schema.model_dump()
+        _t.add_metadata(reused=reused, n_columns=len(state["schema"]["columns"]))
+    duration = time.time() - start
+
+    log_entry = AgentLogEntry(
+        agent_name="Schema",
+        task="Profile columns",
+        input_summary=f"Table: {state['schema']['table_name']}",
+        output_summary=("Reused existing profile" if reused else "Profiled")
+        + f" ({state['schema']['column_count']} columns)",
+        duration_seconds=round(duration, 2),
+    )
+    state["agent_log"].append(log_entry.model_dump())
+    return state
+
+
 def planner_node(state: AgentState) -> AgentState:
     """Run the Planner Agent to create an analysis plan."""
     start = time.time()
@@ -330,6 +361,7 @@ def build_graph() -> StateGraph:
     graph = StateGraph(AgentState)
 
     # Add nodes
+    graph.add_node("schema", schema_node)
     graph.add_node("planner", planner_node)
     graph.add_node("coder", coder_node)
     graph.add_node("critic", critic_node)
@@ -338,7 +370,8 @@ def build_graph() -> StateGraph:
     graph.add_node("storyteller", storyteller_node)
 
     # Define edges
-    graph.set_entry_point("planner")
+    graph.set_entry_point("schema")
+    graph.add_edge("schema", "planner")
     graph.add_edge("planner", "coder")
     graph.add_edge("coder", "visualizer")
     graph.add_edge("visualizer", "critic")
@@ -363,75 +396,18 @@ def build_graph() -> StateGraph:
     return graph
 
 
-def run_analysis(
+def _initial_state(
     question: str,
-    schema: SemanticSchema,
+    schema: Optional[SemanticSchema],
     db: Database,
     df: pd.DataFrame,
-    display_question: Optional[str] = None,
-) -> AgentState:
-    """
-    Run the full agent pipeline for a question.
-
-    Returns the final state with all results.
-    """
-    graph = build_graph()
-    app = graph.compile()
-
-    initial_state: AgentState = {
-        "question": question,
-        "display_question": display_question or question,
-        "schema": schema.model_dump(),
-        "plan": None,
-        "sql_query": None,
-        "result_df": None,
-        "chart": None,
-        "chart_config": None,
-        "validation": None,
-        "prediction": None,
-        "prediction_chart": None,
-        "narrative": None,
-        "error": None,
-        "retry_count": 0,
-        "agent_log": [],
-        "db": db,
-        "df": df,
-    }
-
-    run_id = tracing.new_run(question, dataset=schema.table_name)
-    try:
-        result = app.invoke(initial_state)
-        tracing.end_run(status="ok")
-        if isinstance(result, dict):
-            result["run_id"] = run_id
-        return result
-    except Exception as e:
-        tracing.end_run(status="error", error=str(e))
-        raise
-
-
-def run_analysis_stream(
-    question: str,
-    schema: SemanticSchema,
-    db: Database,
-    df: pd.DataFrame,
+    display_question: Optional[str],
     skip_storyteller: bool = False,
-    display_question: Optional[str] = None,
-):
-    """
-    Streaming version of run_analysis.
-
-    Yields (node_name, merged_state) after each graph node executes, then
-    a final ("done", final_state) event. Callers can use this to drive a
-    live progress UI (e.g. st.status).
-    """
-    graph = build_graph()
-    app = graph.compile()
-
-    initial_state: AgentState = {
+) -> AgentState:
+    return {
         "question": question,
         "display_question": display_question or question,
-        "schema": schema.model_dump(),
+        "schema": schema.model_dump() if schema is not None else None,
         "plan": None,
         "sql_query": None,
         "result_df": None,
@@ -449,7 +425,56 @@ def run_analysis_stream(
         "skip_storyteller": skip_storyteller,
     }
 
-    run_id = tracing.new_run(question, dataset=schema.table_name)
+
+def run_analysis(
+    question: str,
+    schema: Optional[SemanticSchema],
+    db: Database,
+    df: pd.DataFrame,
+    display_question: Optional[str] = None,
+) -> AgentState:
+    """
+    Run the full agent pipeline for a question.
+
+    `schema` may be None; the graph's schema node then profiles `df`.
+    Returns the final state with all results.
+    """
+    app = build_graph().compile()
+    initial_state = _initial_state(question, schema, db, df, display_question)
+
+    run_id = tracing.new_run(question, dataset=db.table_name)
+    try:
+        result = app.invoke(initial_state)
+        tracing.end_run(status="ok")
+        if isinstance(result, dict):
+            result["run_id"] = run_id
+        return result
+    except Exception as e:
+        tracing.end_run(status="error", error=str(e))
+        raise
+
+
+def run_analysis_stream(
+    question: str,
+    schema: Optional[SemanticSchema],
+    db: Database,
+    df: pd.DataFrame,
+    skip_storyteller: bool = False,
+    display_question: Optional[str] = None,
+):
+    """
+    Streaming version of run_analysis.
+
+    Yields (node_name, merged_state) after each graph node executes, then
+    a final ("done", final_state) event. Callers can use this to drive a
+    live progress UI (e.g. st.status).
+    """
+    app = build_graph().compile()
+    initial_state = _initial_state(
+        question, schema, db, df, display_question, skip_storyteller,
+    )
+
+    run_id = tracing.new_run(question, dataset=db.table_name)
     merged: dict = dict(initial_state)
     merged["run_id"] = run_id
     try:
