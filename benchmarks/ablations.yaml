@@ -1,0 +1,41 @@
+# Ablation configs for `python -m benchmarks.ablate`.
+#
+# Within a benchmark, the FIRST run is the baseline; every other run is
+# compared to it on the same questions (paired Δ + McNemar p).
+# `subset` + `seed` pick a fixed difficulty-stratified sample, so all
+# runs of a benchmark see identical questions.
+#
+# Check the cost before spending: python -m benchmarks.ablate --plan
+
+defaults:
+  subset: 200
+  seed: 0
+  concurrency: 4
+
+runs:
+  # ── Spider dev: does self-repair help? ──────────────────────────────
+  - name: spider-flash-single
+    benchmark: spider
+    model: gemini-2.5-flash
+    mode: single
+  - name: spider-flash-repair
+    benchmark: spider
+    model: gemini-2.5-flash
+    mode: repair
+
+  # ── BIRD mini-dev: evidence hints and self-repair ───────────────────
+  - name: bird-flash-evidence-single
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: single
+    evidence: true
+  - name: bird-flash-evidence-repair
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+  - name: bird-flash-noevidence-repair
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: false
