@@ -163,12 +163,16 @@ def _generate_suggested_questions(
 
 
 def profile_dataframe(
-    df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME
+    df: pd.DataFrame,
+    table_name: str = DEFAULT_TABLE_NAME,
+    suggest_questions: bool = True,
 ) -> SemanticSchema:
     """
     Profile a DataFrame and generate a semantic schema.
 
-    This is the main entry point for the Schema Agent.
+    This is the main entry point for the Schema Agent. Profiling is pure
+    pandas; `suggest_questions` adds one LLM call for the UI's starter
+    questions and is off when the graph profiles on its own.
     """
     # Auto-detect and convert datetime columns
     for col in df.columns:
@@ -188,6 +192,9 @@ def profile_dataframe(
         columns=columns,
         suggested_analyses=analyses,
     )
+
+    if not suggest_questions:
+        return schema
 
     # Generate AI-powered suggested questions (cached by dataset signature)
     key = _suggestion_cache_key(schema)
