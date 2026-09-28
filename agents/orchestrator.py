@@ -5,6 +5,7 @@ import json
 import pandas as pd
 from typing import Any, Dict, List, Optional, TypedDict, Annotated
 from langgraph.graph import StateGraph, END
+from langgraph.types import interrupt
 
 from models.analysis_plan import (
     AnalysisPlan,
@@ -24,7 +25,8 @@ from agents import (
     storyteller_agent,
 )
 from core.database import Database
-from core import tracing
+from core import faithfulness, pii, resources, tracing
+from core.semantic_cache import default_cache, schema_version
 from config import MODEL_NAME
 
 
@@ -48,12 +50,85 @@ class AgentState(TypedDict):
     retry_count: int
     agent_log: List[dict]
     skip_storyteller: Optional[bool]
-    # References (not serialized in state)
-    db: Optional[Any]
-    df: Optional[Any]
+    # The engine and source DataFrame live in core.resources, not in state,
+    # so state stays serializable for the checkpointer.
+    datasource_id: Optional[str]
+    # Earlier turns of this conversation: [{question, sql, result_preview}].
+    history: List[dict]
+    cache_hit: Optional[bool]
+
+
+def _resources(state) -> tuple:
+    """(engine, source DataFrame) for this run.
+
+    A direct `db` (legacy callers and unit tests) wins; otherwise the
+    registered datasource_id is resolved.
+    """
+    if state.get("db") is not None:
+        return state["db"], state.get("df")
+    return resources.get(state["datasource_id"])
+
+
+def _pii_report(state):
+    try:
+        db, _ = _resources(state)
+        return pii.detect(db.datasource())
+    except Exception:
+        return None
+
+
+def _sample_primary_table(db, n: int = 50_000) -> pd.DataFrame:
+    q = '"' + db.table_name.replace('"', '""') + '"'
+    df, err = db.execute_query(f"SELECT * FROM {q}", max_rows=n)
+    return df if err is None else pd.DataFrame()
+
+
+def _with_history(question: str, history: list) -> str:
+    """Prefix a follow-up with the conversation so far ("now by region")."""
+    if not history:
+        return question
+    turns = "\n".join(
+        f"{i}. Q: {h['question']}\n   SQL: {h.get('sql') or '-'}\n   Result (first rows): {h.get('result_preview') or '-'}"
+        for i, h in enumerate(history[-3:], 1)
+    )
+    return (f"CONVERSATION SO FAR (use it to resolve references like 'that', 'those', 'by region'):\n"
+            f"{turns}\n\nCURRENT QUESTION: {question}")
 
 
 # --- Agent Node Functions ---
+
+def schema_node(state: AgentState) -> AgentState:
+    """Run the Schema Agent: profile the primary table's columns.
+
+    Callers that already profiled the dataset (the UI does so on upload
+    to render the profile) pass it in and the node reuses it; otherwise
+    it profiles `df` here. No LLM call either way.
+    """
+    start = time.time()
+    reused = state.get("schema") is not None
+    with tracing.span("schema") as _t:
+        if not reused:
+            db, df = _resources(state)
+            if df is None:  # file-backed engine: profile a sample of the primary table
+                df = _sample_primary_table(db)
+            schema = schema_agent.profile_dataframe(
+                df, db.table_name, suggest_questions=False,
+            )
+            state["schema"] = schema.model_dump()
+        _t.add_metadata(reused=reused, n_columns=len(state["schema"]["columns"]))
+    duration = time.time() - start
+
+    log_entry = AgentLogEntry(
+        agent_name="Schema",
+        task="Profile columns",
+        input_summary=f"Table: {state['schema']['table_name']}",
+        output_summary=("Reused existing profile" if reused else "Profiled")
+        + f" ({state['schema']['column_count']} columns)",
+        duration_seconds=round(duration, 2),
+    )
+    state["agent_log"].append(log_entry.model_dump())
+    return state
+
 
 def planner_node(state: AgentState) -> AgentState:
     """Run the Planner Agent to create an analysis plan."""
@@ -90,17 +165,35 @@ def coder_node(state: AgentState) -> AgentState:
     """
     start = time.time()
     schema = SemanticSchema(**state["schema"])
-    db = state["db"]
+    db, df = _resources(state)
     state["retry_count"] = state.get("retry_count", 0) + 1
+    history = state.get("history") or []
+    cache = default_cache() if not history else None  # follow-ups depend on context
+    version = schema_version(db.datasource()) if cache else None
 
     with tracing.span("coder", model=MODEL_NAME) as _t:
-        result_df, code_result = coder_agent.execute_analysis(
-            state["question"], schema, db, source_df=state.get("df"),
-        )
+        result_df, code_result, hit = None, None, False
+        cached_sql = cache.lookup(state["question"], version) if cache else None
+        if cached_sql:
+            result_df, err = db.execute_query(cached_sql)
+            if err is None:
+                hit = True
+                code_result = coder_agent.CodeResult(
+                    sql_query=cached_sql, success=True, row_count=len(result_df),
+                    columns=list(result_df.columns), attempts=0,
+                )
+        if code_result is None:
+            with tracing.usage_scope() as usage:
+                result_df, code_result = coder_agent.execute_analysis(
+                    _with_history(state["question"], history), schema, db, source_df=df,
+                )
+            if cache and code_result.success and code_result.sql_query.lstrip().lower().startswith(("select", "with")):
+                cache.store(state["question"], version, code_result.sql_query, usage.cost_usd)
         _t.add_metadata(
             sql=(code_result.sql_query or "")[:300],
             row_count=code_result.row_count,
             success=code_result.success,
+            cache_hit=hit,
         )
     duration = time.time() - start
 
@@ -116,6 +209,7 @@ def coder_node(state: AgentState) -> AgentState:
     state["sql_query"] = code_result.sql_query
     state["result_df"] = result_df
     state["error"] = code_result.error
+    state["cache_hit"] = hit
     state["agent_log"].append(log_entry.model_dump())
     return state
 
@@ -196,7 +290,7 @@ def predictor_node(state: AgentState) -> AgentState:
     start = time.time()
     plan = state.get("plan", {})
     analysis_types = plan.get("analysis_types", [])
-    df = state.get("df")
+    _, df = _resources(state)
     schema = SemanticSchema(**state["schema"])
 
     if df is None:
@@ -259,9 +353,7 @@ def storyteller_node(state: AgentState) -> AgentState:
 
     start = time.time()
     result_df = state.get("result_df")
-    result_summary = ""
-    if result_df is not None:
-        result_summary = result_df.head(20).to_string()
+    result_summary = storyteller_agent.summarize_result(result_df, _pii_report(state))
 
     validation = state.get("validation", {})
     warnings = validation.get("warnings", [])
@@ -286,6 +378,10 @@ def storyteller_node(state: AgentState) -> AgentState:
         duration_seconds=round(duration, 2),
     )
     state["narrative"] = narrative
+    warning = faithfulness.check(narrative, result_df, state["question"])
+    if warning:
+        state["validation"] = {**(state.get("validation") or {}),
+                               "warnings": (state.get("validation") or {}).get("warnings", []) + [warning]}
     state["agent_log"].append(log_entry.model_dump())
     return state
 
@@ -306,12 +402,11 @@ def should_retry(state: AgentState) -> str:
     """Determine if we should retry after critic rejection.
 
     Retries are bounded by `retry_count` (incremented in coder_node)
-    and are skipped entirely when the coder hit a terminal error such
-    as an LLM quota exhaustion — retrying a 429 storm just amplifies
-    the outage.
+    and are skipped entirely when the coder hit a terminal error (LLM
+    quota exhaustion or an invalid API key) — retrying a 429 storm just
+    amplifies the outage.
     """
-    error = state.get("error") or ""
-    if "QuotaExhausted" in error:
+    if coder_agent.is_terminal_error(state.get("error") or ""):
         return "continue"
 
     validation = state.get("validation", {})
@@ -323,24 +418,87 @@ def should_retry(state: AgentState) -> str:
     return "continue"
 
 
+# --- Interactive nodes (need a checkpointer; see build_graph) ---
+
+def clarify_node(state: AgentState) -> AgentState:
+    """Pause and ask the user when the planner flags real ambiguity.
+
+    `interrupt()` suspends the run; the API resumes it with the user's
+    answer (Command(resume=...)), which is appended to the question.
+    """
+    ask = (state.get("plan") or {}).get("clarifying_question")
+    if ask:
+        answer = interrupt({"type": "clarify", "question": ask})
+        if answer:
+            state["question"] = f"{state['question']}\nClarification from the user: {answer}"
+            state["plan"]["clarifying_question"] = None
+    return state
+
+
+def confirm_cost_node(state: AgentState) -> AgentState:
+    """Ask before running a query above the engine's cost threshold."""
+    error = state.get("error") or ""
+    if "CostConfirmationRequired" not in error:
+        return state
+    approved = interrupt({"type": "confirm_cost", "sql": state.get("sql_query"), "estimate": error})
+    if approved:
+        db, _ = _resources(state)
+        result_df, err = db.execute_query(state["sql_query"], confirm_cost=True)
+        state["result_df"], state["error"] = result_df, err
+    else:
+        state["error"] = "Cancelled: the query was not run because the cost was not approved."
+    return state
+
+
+def remember_node(state: AgentState) -> AgentState:
+    """Record this turn so the next question in the conversation can refer to it."""
+    result_df = state.get("result_df")
+    preview = result_df.head(5).to_csv(index=False)[:600] if result_df is not None else None
+    turn = {"question": state.get("display_question") or state["question"],
+            "sql": state.get("sql_query"), "result_preview": preview}
+    state["history"] = (state.get("history") or []) + [turn]
+    return state
+
+
+def _after_coder(state: AgentState) -> str:
+    return "confirm_cost" if "CostConfirmationRequired" in (state.get("error") or "") else "visualizer"
+
+
 # --- Build the Graph ---
 
-def build_graph() -> StateGraph:
-    """Build the LangGraph agent workflow."""
+def build_graph(interactive: bool = False) -> StateGraph:
+    """Build the LangGraph agent workflow.
+
+    `interactive=True` adds the human-in-the-loop nodes (clarifying
+    question after planning, cost confirmation after coding). They use
+    `interrupt()`, which requires compiling with a checkpointer (the API
+    does); the Streamlit app and the benchmarks run the plain graph.
+    """
     graph = StateGraph(AgentState)
 
-    # Add nodes
+    graph.add_node("schema", schema_node)
     graph.add_node("planner", planner_node)
     graph.add_node("coder", coder_node)
     graph.add_node("critic", critic_node)
     graph.add_node("visualizer", visualizer_node)
     graph.add_node("predictor", predictor_node)
     graph.add_node("storyteller", storyteller_node)
+    graph.add_node("remember", remember_node)
+    graph.add_node("decide_predict", lambda state: state)
 
-    # Define edges
-    graph.set_entry_point("planner")
-    graph.add_edge("planner", "coder")
-    graph.add_edge("coder", "visualizer")
+    graph.set_entry_point("schema")
+    graph.add_edge("schema", "planner")
+    if interactive:
+        graph.add_node("clarify", clarify_node)
+        graph.add_node("confirm_cost", confirm_cost_node)
+        graph.add_edge("planner", "clarify")
+        graph.add_edge("clarify", "coder")
+        graph.add_conditional_edges("coder", _after_coder,
+                                    {"confirm_cost": "confirm_cost", "visualizer": "visualizer"})
+        graph.add_edge("confirm_cost", "visualizer")
+    else:
+        graph.add_edge("planner", "coder")
+        graph.add_edge("coder", "visualizer")
     graph.add_edge("visualizer", "critic")
 
     # Conditional: retry or continue after critic
@@ -349,39 +507,29 @@ def build_graph() -> StateGraph:
         should_retry,
         {"retry": "coder", "continue": "decide_predict"},
     )
-
-    # Add a decision node for prediction routing
-    graph.add_node("decide_predict", lambda state: state)
     graph.add_conditional_edges(
         "decide_predict",
         should_predict,
         {"predictor": "predictor", "storyteller": "storyteller"},
     )
     graph.add_edge("predictor", "storyteller")
-    graph.add_edge("storyteller", END)
+    graph.add_edge("storyteller", "remember")
+    graph.add_edge("remember", END)
 
     return graph
 
 
-def run_analysis(
+def turn_input(
     question: str,
-    schema: SemanticSchema,
-    db: Database,
-    df: pd.DataFrame,
     display_question: Optional[str] = None,
-) -> AgentState:
-    """
-    Run the full agent pipeline for a question.
-
-    Returns the final state with all results.
-    """
-    graph = build_graph()
-    app = graph.compile()
-
-    initial_state: AgentState = {
+    skip_storyteller: bool = False,
+) -> dict:
+    """Per-turn fields, reset for every question. Conversation-level fields
+    (schema, datasource_id, history) are left alone so a checkpointed
+    thread keeps them across turns."""
+    return {
         "question": question,
         "display_question": display_question or question,
-        "schema": schema.model_dump(),
         "plan": None,
         "sql_query": None,
         "result_df": None,
@@ -394,11 +542,46 @@ def run_analysis(
         "error": None,
         "retry_count": 0,
         "agent_log": [],
-        "db": db,
-        "df": df,
+        "skip_storyteller": skip_storyteller,
+        "cache_hit": None,
     }
 
-    run_id = tracing.new_run(question, dataset=schema.table_name)
+
+def _initial_state(
+    question: str,
+    schema: Optional[SemanticSchema],
+    db: Database,
+    df: pd.DataFrame,
+    display_question: Optional[str],
+    skip_storyteller: bool = False,
+    datasource_id: Optional[str] = None,
+) -> AgentState:
+    """First-turn state. Registers (db, df) unless a datasource_id is given."""
+    return {
+        **turn_input(question, display_question, skip_storyteller),
+        "schema": schema.model_dump() if schema is not None else None,
+        "datasource_id": datasource_id or resources.register(db, df),
+        "history": [],
+    }
+
+
+def run_analysis(
+    question: str,
+    schema: Optional[SemanticSchema],
+    db: Database,
+    df: pd.DataFrame,
+    display_question: Optional[str] = None,
+) -> AgentState:
+    """
+    Run the full agent pipeline for a question.
+
+    `schema` may be None; the graph's schema node then profiles `df`.
+    Returns the final state with all results.
+    """
+    app = build_graph().compile()
+    initial_state = _initial_state(question, schema, db, df, display_question)
+
+    run_id = tracing.new_run(question, dataset=db.table_name)
     try:
         result = app.invoke(initial_state)
         tracing.end_run(status="ok")
@@ -408,11 +591,13 @@ def run_analysis(
     except Exception as e:
         tracing.end_run(status="error", error=str(e))
         raise
+    finally:
+        resources.unregister(initial_state["datasource_id"])
 
 
 def run_analysis_stream(
     question: str,
-    schema: SemanticSchema,
+    schema: Optional[SemanticSchema],
     db: Database,
     df: pd.DataFrame,
     skip_storyteller: bool = False,
@@ -425,31 +610,12 @@ def run_analysis_stream(
     a final ("done", final_state) event. Callers can use this to drive a
     live progress UI (e.g. st.status).
     """
-    graph = build_graph()
-    app = graph.compile()
+    app = build_graph().compile()
+    initial_state = _initial_state(
+        question, schema, db, df, display_question, skip_storyteller,
+    )
 
-    initial_state: AgentState = {
-        "question": question,
-        "display_question": display_question or question,
-        "schema": schema.model_dump(),
-        "plan": None,
-        "sql_query": None,
-        "result_df": None,
-        "chart": None,
-        "chart_config": None,
-        "validation": None,
-        "prediction": None,
-        "prediction_chart": None,
-        "narrative": None,
-        "error": None,
-        "retry_count": 0,
-        "agent_log": [],
-        "db": db,
-        "df": df,
-        "skip_storyteller": skip_storyteller,
-    }
-
-    run_id = tracing.new_run(question, dataset=schema.table_name)
+    run_id = tracing.new_run(question, dataset=db.table_name)
     merged: dict = dict(initial_state)
     merged["run_id"] = run_id
     try:
@@ -462,5 +628,7 @@ def run_analysis_stream(
     except Exception as e:
         tracing.end_run(status="error", error=str(e))
         raise
+    finally:
+        resources.unregister(initial_state["datasource_id"])
 
     yield "done", merged

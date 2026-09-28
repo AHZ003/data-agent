@@ -1,0 +1,81 @@
+[project]
+name = "dataagent"
+version = "1.0.0"
+description = "Multi-agent text-to-SQL analytics agent (LangGraph + Gemini + Streamlit)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.32.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "plotly>=5.18.0",
+    "google-genai>=1.0.0",
+    "langgraph>=0.2.0",
+    "sqlglot>=25.0.0",
+    "scipy>=1.12.0",
+    "scikit-learn>=1.4.0",
+    "statsmodels>=0.14.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.6.0",
+    "pyyaml>=6.0",
+    "openpyxl>=3.1.0",
+    "Pillow>=10.0.0",
+    "reportlab>=4.1.0",
+    "duckdb>=1.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
+    "langgraph-checkpoint-sqlite>=2.0",
+]
+
+[project.optional-dependencies]
+bigquery = [
+    "google-cloud-bigquery>=3.25",
+]
+postgres = [
+    "langgraph-checkpoint-postgres>=2.0",
+    "psycopg[binary]>=3.2",
+]
+otel = [
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-sdk>=1.27",
+]
+mcp = [
+    "mcp>=1.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.100",
+    "httpx>=0.27",
+    "opentelemetry-sdk>=1.27",
+    "mcp>=1.2",
+]
+
+[project.scripts]
+dataagent = "cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Installable from the repo (uv tool install .). Not for PyPI as-is: these
+# are generic top-level names; publishing first needs a `dataagent.` namespace.
+[tool.hatch.build.targets.wheel]
+packages = ["agents", "api", "benchmarks", "core", "feedback", "models", "monitoring",
+            "prompts", "retrieval", "routing", "semantic_layer"]
+only-include = ["agents", "api", "benchmarks", "core", "feedback", "models", "monitoring",
+                "prompts", "retrieval", "routing", "semantic_layer", "cli.py", "config.py",
+                "mcp_server.py", "data/chinook.sqlite"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"cli.py" = "cli.py"
+"config.py" = "config.py"
+"mcp_server.py" = "mcp_server.py"
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

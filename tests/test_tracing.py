@@ -86,3 +86,47 @@ def test_cost_differs_by_model(trace_path):
     flash = next(l for l in lines if l["agent_name"] == "a")
     pro = next(l for l in lines if l["agent_name"] == "b")
     assert pro["cost_usd"] > flash["cost_usd"]
+
+
+# ── LLM usage accounting ─────────────────────────────────────────────────
+
+class _UM:
+    def __init__(self, tin, tout, thoughts=0):
+        self.prompt_token_count = tin
+        self.candidates_token_count = tout
+        self.thoughts_token_count = thoughts
+
+
+class _Resp:
+    def __init__(self, *args):
+        self.usage_metadata = _UM(*args)
+
+
+def test_record_usage_goes_to_innermost_span(trace_path):
+    tracing.new_run("q")
+    with tracing.span("outer", model="gemini-2.5-flash"):
+        with tracing.span("coder", model="gemini-2.5-flash"):
+            tracing.record_usage(_Resp(100, 20, 5), "gemini-2.5-flash")
+    tracing.end_run()
+    spans = {s["agent_name"]: s for s in tracing.read_spans(trace_path) if "span_id" in s}
+    assert spans["coder"]["tokens_in"] == 100
+    assert spans["coder"]["tokens_out"] == 25  # thinking tokens billed as output
+    assert spans["outer"]["tokens_in"] == 0
+
+
+def test_usage_scope_accumulates_calls_and_cost(trace_path):
+    with tracing.usage_scope() as u:
+        tracing.record_usage(_Resp(1_000_000, 0), "gemini-2.5-flash")
+        tracing.record_usage(_Resp(0, 1_000_000), "gemini-2.5-flash")
+    assert u.calls == 2
+    assert u.tokens_in == 1_000_000 and u.tokens_out == 1_000_000
+    assert u.cost_usd == pytest.approx(0.15 + 0.60)
+    # Closed scopes stop collecting.
+    tracing.record_usage(_Resp(5, 5), "gemini-2.5-flash")
+    assert u.calls == 2
+
+
+def test_record_usage_ignores_responses_without_metadata(trace_path):
+    with tracing.usage_scope() as u:
+        tracing.record_usage(object(), "gemini-2.5-flash")
+    assert u.calls == 0

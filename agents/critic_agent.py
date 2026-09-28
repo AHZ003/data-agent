@@ -1,16 +1,9 @@
 """Critic Agent - Self-correction and validation of analysis outputs."""
 
-import json
-import re
-from google import genai
-from google.genai import types as genai_types
 import pandas as pd
 from typing import Optional, List
 
 from config import (
-    GOOGLE_API_KEY,
-    MODEL_NAME,
-    CRITIC_AGENT_SYSTEM_PROMPT,
     CRITIC_CONFIDENCE_THRESHOLD_WARN,
     CRITIC_CONFIDENCE_THRESHOLD_REJECT,
 )
@@ -202,72 +195,3 @@ def validate_chart(
         warnings=warnings,
         corrections_made=corrections,
     )
-
-
-def llm_validate(
-    question: str,
-    sql_query: str,
-    result_summary: str,
-    schema: SemanticSchema,
-) -> ValidationReport:
-    """Use Gemini to validate the overall analysis quality."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-
-    schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
-
-    prompt = f"""{CRITIC_AGENT_SYSTEM_PROMPT}
-
-SCHEMA: {schema_desc}
-
-QUESTION: {question}
-SQL QUERY: {sql_query}
-RESULT SUMMARY: {result_summary}
-
-Evaluate this analysis. Return a JSON object:
-{{
-  "confidence": <0-100>,
-  "warnings": ["list of concerns"],
-  "corrections": ["list of suggested fixes"]
-}}
-
-Return ONLY the JSON:"""
-
-    try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=1024,
-            ),
-        )
-        text = response.text.strip()
-        if "```" in text:
-            match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-            if match:
-                text = match.group(1).strip()
-        data = json.loads(text)
-
-        conf = data.get("confidence", 80)
-        warns = data.get("warnings", [])
-        corrs = data.get("corrections", [])
-
-        if conf >= CRITIC_CONFIDENCE_THRESHOLD_WARN:
-            status = ValidationStatus.VALIDATED
-        elif conf >= CRITIC_CONFIDENCE_THRESHOLD_REJECT:
-            status = ValidationStatus.VALIDATED_WITH_WARNINGS
-        else:
-            status = ValidationStatus.REJECTED
-
-        return ValidationReport(
-            status=status,
-            confidence=conf,
-            warnings=warns,
-            corrections_made=corrs,
-        )
-    except Exception:
-        return ValidationReport(
-            status=ValidationStatus.VALIDATED_WITH_WARNINGS,
-            confidence=60,
-            warnings=["Could not perform LLM validation"],
-        )

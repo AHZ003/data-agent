@@ -50,6 +50,8 @@ def _trace_path() -> Path:
 
 
 def _cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+    if model.startswith("ollama/"):
+        return 0.0  # no API bill; see core/llm.py for hardware-time costing
     rates = MODEL_PRICING.get(model) or MODEL_PRICING["default"]
     return round(
         (tokens_in / 1_000_000) * rates["in"] + (tokens_out / 1_000_000) * rates["out"],
@@ -87,6 +89,7 @@ def new_run(question: str, dataset: Optional[str] = None) -> str:
     rid = uuid.uuid4().hex[:16]
     _ctx.run_id = rid
     _ctx.parent_id = None
+    _otel_start_run(rid, question, dataset)
     emit_event(
         kind="run_start",
         agent_name="orchestrator",
@@ -103,6 +106,33 @@ def end_run(status: str = "ok", error: Optional[str] = None) -> None:
     )
     _ctx.run_id = None
     _ctx.parent_id = None
+    _otel_end_run(status, error)
+
+
+def _otel_start_run(rid: str, question: str, dataset: Optional[str]) -> None:
+    from core import otel
+    t = otel.tracer()
+    if t is None:
+        return
+    from opentelemetry import context, trace
+    root = t.start_span("dataagent.run", attributes={"dataagent.run_id": rid, "dataagent.question": question[:500],
+                                                     "dataagent.dataset": dataset or ""})
+    _ctx.otel_run = (root, context.attach(trace.set_span_in_context(root)))
+
+
+def _otel_end_run(status: str, error: Optional[str]) -> None:
+    run = getattr(_ctx, "otel_run", None)
+    if run is None:
+        return
+    from opentelemetry import context
+    from opentelemetry.trace import Status, StatusCode
+    root, token = run
+    root.set_attribute("dataagent.status", status)
+    if error:
+        root.set_status(Status(StatusCode.ERROR, error[:500]))
+    root.end()
+    context.detach(token)
+    _ctx.otel_run = None
 
 
 def current_run_id() -> str:
@@ -173,6 +203,11 @@ def span(
             meta.update(kwargs)
 
     handle = _Handle()
+    stack = _span_stack()
+    stack.append(handle)
+    from core import otel
+    otel_cm = otel.tracer().start_as_current_span(agent_name) if otel.tracer() is not None else None
+    otel_span = otel_cm.__enter__() if otel_cm is not None else None
     try:
         yield handle
     except Exception as e:
@@ -198,6 +233,81 @@ def span(
         )
         _write(asdict(span_obj))
         _ctx.parent_id = parent
+        stack.pop()
+        if otel_span is not None:
+            otel_span.set_attributes(otel.attrs(model, tokens_in, tokens_out, span_obj.cost_usd, meta))
+            if error:
+                from opentelemetry.trace import Status, StatusCode
+                otel_span.set_status(Status(StatusCode.ERROR, error[:500]))
+            otel_cm.__exit__(None, None, None)
+
+
+# ── LLM usage accounting ─────────────────────────────────────────────────
+
+def _span_stack() -> list:
+    if not hasattr(_ctx, "span_stack"):
+        _ctx.span_stack = []
+    return _ctx.span_stack
+
+
+def _scope_stack() -> list:
+    if not hasattr(_ctx, "usage_scopes"):
+        _ctx.usage_scopes = []
+    return _ctx.usage_scopes
+
+
+@dataclass
+class Usage:
+    """Tokens and cost accumulated inside a usage_scope()."""
+    calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
+
+
+@contextmanager
+def usage_scope():
+    """Collect LLM usage from every call made in this thread while open.
+
+        with tracing.usage_scope() as u:
+            run_something()
+        print(u.tokens_in, u.cost_usd)
+
+    Scopes nest; each open scope sees every call.
+    """
+    usage = Usage()
+    stack = _scope_stack()
+    stack.append(usage)
+    try:
+        yield usage
+    finally:
+        stack.remove(usage)
+
+
+def record_usage(response: Any, model: Optional[str] = None, usd: Optional[float] = None) -> None:
+    """Attribute a Gemini response's token usage to the open span and scopes.
+
+    Reads `response.usage_metadata`; thinking tokens are billed as
+    output, so they count toward tokens_out. Responses without usage
+    metadata (e.g. cassette fakes) are ignored.
+    """
+    um = getattr(response, "usage_metadata", None)
+    if um is None:
+        return
+    tin = int(getattr(um, "prompt_token_count", 0) or 0)
+    tout = int(getattr(um, "candidates_token_count", 0) or 0) + int(
+        getattr(um, "thoughts_token_count", 0) or 0
+    )
+    stack = _span_stack()
+    if stack:
+        stack[-1].set_tokens(in_=tin, out_=tout)
+    # `usd` overrides token pricing (local models: amortized hardware time).
+    cost = usd if usd is not None else _cost_usd(model or "default", tin, tout)
+    for usage in _scope_stack():
+        usage.calls += 1
+        usage.tokens_in += tin
+        usage.tokens_out += tout
+        usage.cost_usd = round(usage.cost_usd + cost, 6)
 
 
 # ── Query API (for a future trace-viewer UI) ─────────────────────────────

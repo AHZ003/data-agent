@@ -2,11 +2,10 @@
 
 import json
 import re
-from google import genai
-from google.genai import types as genai_types
 from typing import Iterator, List, Dict, Any, Optional
 
-from config import GOOGLE_API_KEY, MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
+from config import STORYTELLER_AGENT_SYSTEM_PROMPT, model_for
+from core import injection, llm
 from models.report import AnalysisReport, ReportSection
 
 
@@ -18,10 +17,14 @@ def _build_narrative_prompt(
     validation_warnings: Optional[List[str]] = None,
     prediction_info: Optional[Dict[str, Any]] = None,
 ) -> str:
+    if injection.enabled():
+        # String-level defense for callers that pass raw text (summarize_result
+        # already neutralizes at the cell level).
+        result_summary = injection._RX.sub(injection.PLACEHOLDER, result_summary or "")
     context_parts = [
         f"Question: {question}",
         f"SQL Query: {sql_query}",
-        f"Results: {result_summary}",
+        "Results:\n" + injection.wrap("query_results", result_summary),
     ]
     if chart_description:
         context_parts.append(f"Chart: {chart_description}")
@@ -30,12 +33,33 @@ def _build_narrative_prompt(
     if prediction_info:
         context_parts.append(f"Prediction: {json.dumps(prediction_info, default=str)}")
 
+    notice = f"\n{injection.DATA_NOTICE}\n" if injection.enabled() else ""
     return f"""{STORYTELLER_AGENT_SYSTEM_PROMPT}
-
+{notice}
 ANALYSIS CONTEXT:
 {chr(10).join(context_parts)}
 
 Write the narrative now. Lead with the key finding, include specific numbers, and end with an actionable takeaway."""
+
+
+def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
+    """The result table as the Storyteller may see it.
+
+    PII columns are masked, instruction-like cells neutralized, and in
+    local-only mode only the shape and numeric summaries are shared.
+    """
+    from core import pii
+
+    if df is None:
+        return ""
+    if pii.local_only():
+        num = df.select_dtypes("number")
+        desc = num.describe().round(4).to_string() if not num.empty else "(no numeric columns)"
+        return f"{len(df)} rows; columns: {', '.join(map(str, df.columns))}\nNumeric summary:\n{desc}"
+    safe = injection.sanitize_frame(df.head(max_rows))
+    if pii_report is not None:
+        safe = pii.mask_frame(safe, pii_report)
+    return safe.to_string()
 
 
 def generate_narrative(
@@ -47,20 +71,12 @@ def generate_narrative(
     prediction_info: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate a plain-English narrative for a single analysis step (blocking)."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.3,
-            max_output_tokens=512,
-        ),
-    )
-    return response.text.strip()
+    return llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
+                        max_output_tokens=512).strip()
 
 
 def stream_narrative(
@@ -77,23 +93,13 @@ def stream_narrative(
     word-chunker. Callers like `st.write_stream` can consume this
     iterator directly.
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
     )
     try:
-        for chunk in client.models.generate_content_stream(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=1024,
-            ),
-        ):
-            text = getattr(chunk, "text", None)
-            if text:
-                yield text
+        yield from llm.generate_stream(prompt, model=model_for("storyteller"), temperature=0.3,
+                                       max_output_tokens=1024)
     except Exception as e:
         yield f"\n\n_Narrative generation encountered an error: {e}_"
 
@@ -109,7 +115,6 @@ def generate_full_report(
     - analyses: list of {question, sql, result_summary, narrative, warnings}
     - predictions: list of prediction results (optional)
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
 
     analyses = session_data.get("analyses", [])
     predictions = session_data.get("predictions", [])
@@ -155,15 +160,8 @@ Return a JSON object with this structure:
 Return ONLY the JSON:"""
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=2048,
-            ),
-        )
-        text = response.text.strip()
+        text = llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
+                            max_output_tokens=2048).strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
             if match:

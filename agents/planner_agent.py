@@ -2,11 +2,10 @@
 
 import json
 import re
-from google import genai
-from google.genai import types as genai_types
 from typing import List
 
-from config import GOOGLE_API_KEY, MODEL_NAME, PLANNER_AGENT_SYSTEM_PROMPT
+from config import PLANNER_AGENT_SYSTEM_PROMPT, model_for
+from core import llm
 from models.analysis_plan import (
     AnalysisPlan,
     AnalysisType,
@@ -21,8 +20,6 @@ def create_analysis_plan(
     """
     Classify a question and create a step-by-step analysis plan.
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 
     prompt = f"""{PLANNER_AGENT_SYSTEM_PROMPT}
@@ -41,7 +38,8 @@ Return a JSON object with this exact structure:
     {{"agent": "visualizer", "task": "description of chart to create"}},
     {{"agent": "predictor", "task": "description of prediction to make"}},
     {{"agent": "storyteller", "task": "description of narrative to generate"}}
-  ]
+  ],
+  "clarifying_question": null
 }}
 
 Valid agents: coder, visualizer, predictor, critic, storyteller
@@ -50,15 +48,8 @@ Valid analysis_types: descriptive, trend, comparison, correlation, prediction, s
 Return ONLY the JSON object:"""
 
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.0,
-                max_output_tokens=1024,
-            ),
-        )
-        text = response.text.strip()
+        text = llm.generate(prompt, model=model_for("planner"), temperature=0.0,
+                            max_output_tokens=1024).strip()
     except Exception:
         return _fallback_plan(question)
 
@@ -94,10 +85,12 @@ Return ONLY the JSON object:"""
         if not steps:
             steps = [PlanStep(agent="coder", task=f"Answer: {question}")]
 
+        clarify = data.get("clarifying_question")
         return AnalysisPlan(
             question=question,
             analysis_types=analysis_types,
             steps=steps,
+            clarifying_question=clarify.strip() if isinstance(clarify, str) and clarify.strip() else None,
         )
     except Exception:
         return _fallback_plan(question)

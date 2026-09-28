@@ -1,0 +1,545 @@
+# Internal multi-table golden set: Chinook (data/chinook.sqlite, MIT).
+#
+# Scored by execution accuracy through the same harness as Spider
+# (benchmarks/golden_sql_eval.py): the gold SQL is executed and compared
+# with the agent's result using the Spider rule (order matters only when
+# the gold SQL has ORDER BY). Questions that ask for an order say so.
+#
+# difficulty: easy = one table; medium = joins / grouping; hard =
+# subqueries, anti-joins, window functions, multi-step logic.
+# tests/test_golden_sql.py checks every gold query runs, is non-empty,
+# and that no ORDER BY ... LIMIT answer is decided by a tie.
+
+db: data/chinook.sqlite
+
+cases:
+  # ── easy ────────────────────────────────────────────────────────────
+  - id: chk_001
+    question: How many customers are there?
+    gold_sql: SELECT COUNT(*) FROM Customer
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_002
+    question: How many tracks are in the catalog?
+    gold_sql: SELECT COUNT(*) FROM Track
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_003
+    question: How many artists are there?
+    gold_sql: SELECT COUNT(*) FROM Artist
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_004
+    question: How many invoices were issued in 2010?
+    gold_sql: SELECT COUNT(*) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2010'
+    difficulty: easy
+    tags: [aggregation, time]
+  - id: chk_005
+    question: What is the total revenue across all invoices?
+    gold_sql: SELECT SUM(Total) FROM Invoice
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_006
+    question: What is the average invoice total?
+    gold_sql: SELECT AVG(Total) FROM Invoice
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_007
+    question: Which countries do customers come from? List each country once.
+    gold_sql: SELECT DISTINCT Country FROM Customer
+    difficulty: easy
+    tags: [filter]
+  - id: chk_008
+    question: How many customers are from Brazil?
+    gold_sql: SELECT COUNT(*) FROM Customer WHERE Country = 'Brazil'
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_009
+    question: List the first and last names of customers who have a company listed.
+    gold_sql: SELECT FirstName, LastName FROM Customer WHERE Company IS NOT NULL
+    difficulty: easy
+    tags: [filter]
+  - id: chk_010
+    question: What is the name of the longest track?
+    gold_sql: SELECT Name FROM Track ORDER BY Milliseconds DESC LIMIT 1
+    difficulty: easy
+    tags: [ranking]
+  - id: chk_011
+    question: How many tracks are priced at 1.99?
+    gold_sql: SELECT COUNT(*) FROM Track WHERE UnitPrice = 1.99
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_012
+    question: How many employees have the title Sales Support Agent?
+    gold_sql: SELECT COUNT(*) FROM Employee WHERE Title = 'Sales Support Agent'
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_013
+    question: What is the average track length in minutes?
+    gold_sql: SELECT AVG(Milliseconds) / 60000.0 FROM Track
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_014
+    question: How many music genres are there?
+    gold_sql: SELECT COUNT(*) FROM Genre
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_015
+    question: List the names of all media types.
+    gold_sql: SELECT Name FROM MediaType
+    difficulty: easy
+    tags: [filter]
+  - id: chk_016
+    question: What is the largest single invoice total?
+    gold_sql: SELECT MAX(Total) FROM Invoice
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_017
+    question: How many invoices have a total greater than 10?
+    gold_sql: SELECT COUNT(*) FROM Invoice WHERE Total > 10
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_018
+    question: What is the email address of the employee Jane Peacock?
+    gold_sql: SELECT Email FROM Employee WHERE FirstName = 'Jane' AND LastName = 'Peacock'
+    difficulty: easy
+    tags: [filter]
+  - id: chk_019
+    question: Which employees were hired in 2003? Give their first and last names.
+    gold_sql: SELECT FirstName, LastName FROM Employee WHERE strftime('%Y', HireDate) = '2003'
+    difficulty: easy
+    tags: [filter, time]
+  - id: chk_020
+    question: How many customers are in each country? Sort by the number of customers, highest first, then by country name.
+    gold_sql: SELECT Country, COUNT(*) AS n FROM Customer GROUP BY Country ORDER BY n DESC, Country
+    difficulty: easy
+    tags: [breakdown, ranking]
+  - id: chk_021
+    question: What is the total size in bytes of all tracks?
+    gold_sql: SELECT SUM(Bytes) FROM Track
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_022
+    question: How many tracks have no composer listed?
+    gold_sql: SELECT COUNT(*) FROM Track WHERE Composer IS NULL
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_023
+    question: How many invoices were billed to the USA?
+    gold_sql: SELECT COUNT(*) FROM Invoice WHERE BillingCountry = 'USA'
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_024
+    question: What is the total revenue from invoices billed to Germany?
+    gold_sql: SELECT SUM(Total) FROM Invoice WHERE BillingCountry = 'Germany'
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_025
+    question: How many playlists are there?
+    gold_sql: SELECT COUNT(*) FROM Playlist
+    difficulty: easy
+    tags: [aggregation]
+  - id: chk_026
+    question: What is the average invoice total for each billing country?
+    gold_sql: SELECT BillingCountry, AVG(Total) FROM Invoice GROUP BY BillingCountry
+    difficulty: easy
+    tags: [breakdown]
+  - id: chk_027
+    question: How many customers have a fax number on file?
+    gold_sql: SELECT COUNT(*) FROM Customer WHERE Fax IS NOT NULL
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_028
+    question: Which US states do customers live in? List each state once.
+    gold_sql: SELECT DISTINCT State FROM Customer WHERE Country = 'USA'
+    difficulty: easy
+    tags: [filter]
+  - id: chk_029
+    question: What is the total revenue for each year? Order by year.
+    gold_sql: SELECT strftime('%Y', InvoiceDate) AS year, SUM(Total) FROM Invoice GROUP BY year ORDER BY year
+    difficulty: easy
+    tags: [time, breakdown]
+  - id: chk_030
+    question: How many invoices were issued in each month of 2011? Order by month.
+    gold_sql: SELECT strftime('%m', InvoiceDate) AS month, COUNT(*) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2011' GROUP BY month ORDER BY month
+    difficulty: easy
+    tags: [time, breakdown]
+  - id: chk_031
+    question: What are the names of the 3 largest tracks by file size, largest first?
+    gold_sql: SELECT Name FROM Track ORDER BY Bytes DESC LIMIT 3
+    difficulty: easy
+    tags: [ranking, top_n]
+  - id: chk_032
+    question: Which billing country generated the most revenue?
+    gold_sql: SELECT BillingCountry FROM Invoice GROUP BY BillingCountry ORDER BY SUM(Total) DESC LIMIT 1
+    difficulty: easy
+    tags: [ranking]
+  - id: chk_033
+    question: How many employees have the title IT Staff?
+    gold_sql: SELECT COUNT(*) FROM Employee WHERE Title = 'IT Staff'
+    difficulty: easy
+    tags: [filter, aggregation]
+  - id: chk_034
+    question: What is the earliest invoice date?
+    gold_sql: SELECT MIN(InvoiceDate) FROM Invoice
+    difficulty: easy
+    tags: [time, aggregation]
+  - id: chk_035
+    question: List the countries with more than 5 customers.
+    gold_sql: SELECT Country FROM Customer GROUP BY Country HAVING COUNT(*) > 5
+    difficulty: easy
+    tags: [breakdown, filter]
+
+  # ── medium ──────────────────────────────────────────────────────────
+  - id: chk_036
+    question: How many albums does AC/DC have?
+    gold_sql: SELECT COUNT(*) FROM Album al JOIN Artist ar ON al.ArtistId = ar.ArtistId WHERE ar.Name = 'AC/DC'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_037
+    question: List the titles of albums by Queen.
+    gold_sql: SELECT al.Title FROM Album al JOIN Artist ar ON al.ArtistId = ar.ArtistId WHERE ar.Name = 'Queen'
+    difficulty: medium
+    tags: [join, filter]
+  - id: chk_038
+    question: Which artist has the most albums?
+    gold_sql: SELECT ar.Name FROM Album al JOIN Artist ar ON al.ArtistId = ar.ArtistId GROUP BY ar.ArtistId ORDER BY COUNT(*) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking]
+  - id: chk_039
+    question: How many tracks are in the Rock genre?
+    gold_sql: SELECT COUNT(*) FROM Track t JOIN Genre g ON t.GenreId = g.GenreId WHERE g.Name = 'Rock'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_040
+    question: What are the top 5 genres by number of tracks, with their track counts, most first?
+    gold_sql: SELECT g.Name, COUNT(*) AS n FROM Track t JOIN Genre g ON t.GenreId = g.GenreId GROUP BY g.GenreId ORDER BY n DESC LIMIT 5
+    difficulty: medium
+    tags: [join, ranking, top_n]
+  - id: chk_041
+    question: What is the total sales revenue for each genre?
+    gold_sql: SELECT g.Name, SUM(il.UnitPrice * il.Quantity) FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId GROUP BY g.GenreId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_042
+    question: Which genre generated the most sales revenue?
+    gold_sql: SELECT g.Name FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId GROUP BY g.GenreId ORDER BY SUM(il.UnitPrice * il.Quantity) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking]
+  - id: chk_043
+    question: Who are the top 5 customers by total spending? Give first name, last name and total, highest first.
+    gold_sql: SELECT c.FirstName, c.LastName, SUM(i.Total) AS spent FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId ORDER BY spent DESC LIMIT 5
+    difficulty: medium
+    tags: [join, ranking, top_n]
+  - id: chk_044
+    question: How many customers does each support representative look after? Give the rep's first and last name and the count.
+    gold_sql: SELECT e.FirstName, e.LastName, COUNT(*) FROM Customer c JOIN Employee e ON c.SupportRepId = e.EmployeeId GROUP BY e.EmployeeId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_045
+    question: Which support representative has the most customers? Give their first and last name.
+    gold_sql: SELECT e.FirstName, e.LastName FROM Customer c JOIN Employee e ON c.SupportRepId = e.EmployeeId GROUP BY e.EmployeeId ORDER BY COUNT(*) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking]
+  - id: chk_046
+    question: What are the total sales handled by each support representative (sum of their customers' invoices)?
+    gold_sql: SELECT e.FirstName, e.LastName, SUM(i.Total) FROM Employee e JOIN Customer c ON c.SupportRepId = e.EmployeeId JOIN Invoice i ON i.CustomerId = c.CustomerId GROUP BY e.EmployeeId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_047
+    question: How many tracks are there for each media type?
+    gold_sql: SELECT m.Name, COUNT(*) FROM Track t JOIN MediaType m ON t.MediaTypeId = m.MediaTypeId GROUP BY m.MediaTypeId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_048
+    question: Which album has the most tracks?
+    gold_sql: SELECT al.Title FROM Track t JOIN Album al ON t.AlbumId = al.AlbumId GROUP BY al.AlbumId ORDER BY COUNT(*) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking]
+  - id: chk_049
+    question: What is the average track length in milliseconds for each genre?
+    gold_sql: SELECT g.Name, AVG(t.Milliseconds) FROM Track t JOIN Genre g ON t.GenreId = g.GenreId GROUP BY g.GenreId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_050
+    question: List the names of the tracks on the album Let There Be Rock.
+    gold_sql: SELECT t.Name FROM Track t JOIN Album al ON t.AlbumId = al.AlbumId WHERE al.Title = 'Let There Be Rock'
+    difficulty: medium
+    tags: [join, filter]
+  - id: chk_051
+    question: How many invoice lines are for tracks by Metallica?
+    gold_sql: SELECT COUNT(*) FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Album al ON t.AlbumId = al.AlbumId JOIN Artist ar ON al.ArtistId = ar.ArtistId WHERE ar.Name = 'Metallica'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_052
+    question: How many distinct customers bought at least one Jazz track?
+    gold_sql: SELECT COUNT(DISTINCT i.CustomerId) FROM Invoice i JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId WHERE g.Name = 'Jazz'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_053
+    question: How many tracks are on the Grunge playlist?
+    gold_sql: SELECT COUNT(*) FROM PlaylistTrack pt JOIN Playlist p ON pt.PlaylistId = p.PlaylistId WHERE p.Name = 'Grunge'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_054
+    question: For each customer in Canada, what is their total spending? Give first name, last name and total.
+    gold_sql: SELECT c.FirstName, c.LastName, SUM(i.Total) FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId WHERE c.Country = 'Canada' GROUP BY c.CustomerId
+    difficulty: medium
+    tags: [join, breakdown, filter]
+  - id: chk_055
+    question: What percentage of tracks are priced at 1.99?
+    gold_sql: SELECT 100.0 * SUM(CASE WHEN UnitPrice = 1.99 THEN 1 ELSE 0 END) / COUNT(*) FROM Track
+    difficulty: medium
+    tags: [ratio]
+  - id: chk_056
+    question: What is the average number of tracks per album?
+    gold_sql: SELECT COUNT(*) * 1.0 / COUNT(DISTINCT AlbumId) FROM Track
+    difficulty: medium
+    tags: [ratio]
+  - id: chk_057
+    question: Which artists have at least one track in the Classical genre? List each artist once.
+    gold_sql: SELECT DISTINCT ar.Name FROM Track t JOIN Genre g ON t.GenreId = g.GenreId JOIN Album al ON t.AlbumId = al.AlbumId JOIN Artist ar ON al.ArtistId = ar.ArtistId WHERE g.Name = 'Classical'
+    difficulty: medium
+    tags: [join, filter]
+  - id: chk_058
+    question: Who does Nancy Edwards report to? Give the manager's first and last name.
+    gold_sql: SELECT m.FirstName, m.LastName FROM Employee e JOIN Employee m ON e.ReportsTo = m.EmployeeId WHERE e.FirstName = 'Nancy' AND e.LastName = 'Edwards'
+    difficulty: medium
+    tags: [join, self_join]
+  - id: chk_059
+    question: List every employee who has a manager, with the employee's and the manager's first and last names.
+    gold_sql: SELECT e.FirstName, e.LastName, m.FirstName, m.LastName FROM Employee e JOIN Employee m ON e.ReportsTo = m.EmployeeId
+    difficulty: medium
+    tags: [join, self_join]
+  - id: chk_060
+    question: How many albums have more than 20 tracks?
+    gold_sql: SELECT COUNT(*) FROM (SELECT AlbumId FROM Track GROUP BY AlbumId HAVING COUNT(*) > 20)
+    difficulty: medium
+    tags: [aggregation, subquery]
+  - id: chk_061
+    question: Which album has the longest total running time?
+    gold_sql: SELECT al.Title FROM Track t JOIN Album al ON t.AlbumId = al.AlbumId GROUP BY al.AlbumId ORDER BY SUM(t.Milliseconds) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking]
+  - id: chk_062
+    question: Which composer is credited on the most tracks?
+    gold_sql: SELECT Composer FROM Track WHERE Composer IS NOT NULL GROUP BY Composer ORDER BY COUNT(*) DESC LIMIT 1
+    difficulty: medium
+    tags: [ranking]
+  - id: chk_063
+    question: What was the total revenue in each quarter of 2011? Order by quarter.
+    gold_sql: SELECT (CAST(strftime('%m', InvoiceDate) AS INTEGER) + 2) / 3 AS quarter, SUM(Total) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2011' GROUP BY quarter ORDER BY quarter
+    difficulty: medium
+    tags: [time, breakdown]
+  - id: chk_064
+    question: What is the sales revenue for each media type?
+    gold_sql: SELECT m.Name, SUM(il.UnitPrice * il.Quantity) FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN MediaType m ON t.MediaTypeId = m.MediaTypeId GROUP BY m.MediaTypeId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_065
+    question: Which customers have spent more than 45 in total? Give first and last names.
+    gold_sql: SELECT c.FirstName, c.LastName FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId HAVING SUM(i.Total) > 45
+    difficulty: medium
+    tags: [join, filter]
+  - id: chk_066
+    question: How many distinct artists have tracks in each genre?
+    gold_sql: SELECT g.Name, COUNT(DISTINCT al.ArtistId) FROM Track t JOIN Genre g ON t.GenreId = g.GenreId JOIN Album al ON t.AlbumId = al.AlbumId GROUP BY g.GenreId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_067
+    question: Who are the top 3 artists by sales revenue, highest first?
+    gold_sql: SELECT ar.Name FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Album al ON t.AlbumId = al.AlbumId JOIN Artist ar ON al.ArtistId = ar.ArtistId GROUP BY ar.ArtistId ORDER BY SUM(il.UnitPrice * il.Quantity) DESC LIMIT 3
+    difficulty: medium
+    tags: [join, ranking, top_n]
+  - id: chk_068
+    question: Which support representative's customers spent the most in 2009? Give the rep's first and last name.
+    gold_sql: SELECT e.FirstName, e.LastName FROM Employee e JOIN Customer c ON c.SupportRepId = e.EmployeeId JOIN Invoice i ON i.CustomerId = c.CustomerId WHERE strftime('%Y', i.InvoiceDate) = '2009' GROUP BY e.EmployeeId ORDER BY SUM(i.Total) DESC LIMIT 1
+    difficulty: medium
+    tags: [join, ranking, time]
+  - id: chk_069
+    question: How many customers does Jane Peacock support?
+    gold_sql: SELECT COUNT(*) FROM Customer c JOIN Employee e ON c.SupportRepId = e.EmployeeId WHERE e.FirstName = 'Jane' AND e.LastName = 'Peacock'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_070
+    question: How many minutes of Heavy Metal music are in the catalog in total?
+    gold_sql: SELECT SUM(t.Milliseconds) / 60000.0 FROM Track t JOIN Genre g ON t.GenreId = g.GenreId WHERE g.Name = 'Heavy Metal'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_071
+    question: What are the top 3 billing cities by revenue, highest first?
+    gold_sql: SELECT BillingCity FROM Invoice GROUP BY BillingCity ORDER BY SUM(Total) DESC LIMIT 3
+    difficulty: medium
+    tags: [ranking, top_n]
+  - id: chk_072
+    question: How many invoices has each customer from France made? Give first name, last name and count.
+    gold_sql: SELECT c.FirstName, c.LastName, COUNT(*) FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId WHERE c.Country = 'France' GROUP BY c.CustomerId
+    difficulty: medium
+    tags: [join, breakdown, filter]
+  - id: chk_073
+    question: How many tracks from the album Big Ones were sold in total?
+    gold_sql: SELECT COUNT(*) FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Album al ON t.AlbumId = al.AlbumId WHERE al.Title = 'Big Ones'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_074
+    question: What is the average unit price of tracks in each media type?
+    gold_sql: SELECT m.Name, AVG(t.UnitPrice) FROM Track t JOIN MediaType m ON t.MediaTypeId = m.MediaTypeId GROUP BY m.MediaTypeId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_075
+    question: How many tracks does each playlist contain? Include playlists with no tracks and show the playlist id, name and count.
+    gold_sql: SELECT p.PlaylistId, p.Name, COUNT(pt.TrackId) FROM Playlist p LEFT JOIN PlaylistTrack pt ON p.PlaylistId = pt.PlaylistId GROUP BY p.PlaylistId
+    difficulty: medium
+    tags: [join, breakdown]
+  - id: chk_076
+    question: What is the total revenue from customers in Brazil, based on their invoices?
+    gold_sql: SELECT SUM(i.Total) FROM Invoice i JOIN Customer c ON i.CustomerId = c.CustomerId WHERE c.Country = 'Brazil'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_077
+    question: How many different genres has the customer Luís Gonçalves bought?
+    gold_sql: SELECT COUNT(DISTINCT t.GenreId) FROM Customer c JOIN Invoice i ON i.CustomerId = c.CustomerId JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId WHERE c.FirstName = 'Luís' AND c.LastName = 'Gonçalves'
+    difficulty: medium
+    tags: [join, aggregation]
+  - id: chk_078
+    question: What is the average invoice total per customer country, highest first? Give country and average.
+    gold_sql: SELECT c.Country, AVG(i.Total) AS avg_total FROM Invoice i JOIN Customer c ON i.CustomerId = c.CustomerId GROUP BY c.Country ORDER BY avg_total DESC
+    difficulty: medium
+    tags: [join, ranking, breakdown]
+  - id: chk_079
+    question: Which album titles by Iron Maiden have more than 15 tracks?
+    gold_sql: SELECT al.Title FROM Album al JOIN Artist ar ON al.ArtistId = ar.ArtistId JOIN Track t ON t.AlbumId = al.AlbumId WHERE ar.Name = 'Iron Maiden' GROUP BY al.AlbumId HAVING COUNT(*) > 15
+    difficulty: medium
+    tags: [join, filter]
+  - id: chk_080
+    question: How many invoices were billed in each billing country in 2012?
+    gold_sql: SELECT BillingCountry, COUNT(*) FROM Invoice WHERE strftime('%Y', InvoiceDate) = '2012' GROUP BY BillingCountry
+    difficulty: medium
+    tags: [time, breakdown]
+
+  # ── hard ────────────────────────────────────────────────────────────
+  - id: chk_081
+    question: How many tracks have never been purchased?
+    gold_sql: SELECT COUNT(*) FROM Track WHERE TrackId NOT IN (SELECT TrackId FROM InvoiceLine)
+    difficulty: hard
+    tags: [anti_join, subquery]
+  - id: chk_082
+    question: Which customers have never bought a Jazz track? Give first and last names.
+    gold_sql: SELECT FirstName, LastName FROM Customer WHERE CustomerId NOT IN (SELECT i.CustomerId FROM Invoice i JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId WHERE g.Name = 'Jazz')
+    difficulty: hard
+    tags: [anti_join, subquery]
+  - id: chk_083
+    question: For each country, what is the highest total amount spent by a single customer? Give country and amount.
+    gold_sql: WITH spend AS (SELECT c.Country, SUM(i.Total) AS total FROM Customer c JOIN Invoice i ON c.CustomerId = i.CustomerId GROUP BY c.CustomerId) SELECT Country, MAX(total) FROM spend GROUP BY Country
+    difficulty: hard
+    tags: [subquery, breakdown]
+  - id: chk_084
+    question: Which month (as YYYY-MM) had the highest total revenue?
+    gold_sql: SELECT strftime('%Y-%m', InvoiceDate) AS ym FROM Invoice GROUP BY ym ORDER BY SUM(Total) DESC LIMIT 1
+    difficulty: hard
+    tags: [time, ranking]
+  - id: chk_085
+    question: How many artists have tracks in more than one genre?
+    gold_sql: SELECT COUNT(*) FROM (SELECT al.ArtistId FROM Track t JOIN Album al ON t.AlbumId = al.AlbumId GROUP BY al.ArtistId HAVING COUNT(DISTINCT t.GenreId) > 1)
+    difficulty: hard
+    tags: [join, subquery]
+  - id: chk_086
+    question: What percentage of total revenue comes from invoices billed to the USA?
+    gold_sql: SELECT 100.0 * SUM(CASE WHEN BillingCountry = 'USA' THEN Total ELSE 0 END) / SUM(Total) FROM Invoice
+    difficulty: hard
+    tags: [ratio]
+  - id: chk_087
+    question: What is the average total spending per customer for each support representative? Give the rep's first and last name and the average.
+    gold_sql: SELECT e.FirstName, e.LastName, AVG(s.total) FROM Employee e JOIN (SELECT c.SupportRepId, c.CustomerId, SUM(i.Total) AS total FROM Customer c JOIN Invoice i ON i.CustomerId = c.CustomerId GROUP BY c.CustomerId) s ON s.SupportRepId = e.EmployeeId GROUP BY e.EmployeeId
+    difficulty: hard
+    tags: [subquery, breakdown]
+  - id: chk_088
+    question: What was the year-over-year change in total revenue for each year after the first? Give the year and the change, ordered by year.
+    gold_sql: WITH y AS (SELECT strftime('%Y', InvoiceDate) AS year, SUM(Total) AS rev FROM Invoice GROUP BY year) SELECT year, rev - LAG(rev) OVER (ORDER BY year) AS change FROM y ORDER BY year LIMIT -1 OFFSET 1
+    difficulty: hard
+    tags: [window, time]
+  - id: chk_089
+    question: How many customers spent more than the average total spending per customer?
+    gold_sql: WITH s AS (SELECT CustomerId, SUM(Total) AS total FROM Invoice GROUP BY CustomerId) SELECT COUNT(*) FROM s WHERE total > (SELECT AVG(total) FROM s)
+    difficulty: hard
+    tags: [subquery, aggregation]
+  - id: chk_090
+    question: Which playlists contain no tracks? Give their ids and names.
+    gold_sql: SELECT PlaylistId, Name FROM Playlist WHERE PlaylistId NOT IN (SELECT PlaylistId FROM PlaylistTrack)
+    difficulty: hard
+    tags: [anti_join]
+  - id: chk_091
+    question: How many albums have never had any of their tracks purchased?
+    gold_sql: SELECT COUNT(*) FROM Album WHERE AlbumId NOT IN (SELECT t.AlbumId FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId)
+    difficulty: hard
+    tags: [anti_join, subquery]
+  - id: chk_092
+    question: Which employees have nobody reporting to them? Give first and last names.
+    gold_sql: SELECT FirstName, LastName FROM Employee WHERE EmployeeId NOT IN (SELECT ReportsTo FROM Employee WHERE ReportsTo IS NOT NULL)
+    difficulty: hard
+    tags: [anti_join, self_join]
+  - id: chk_093
+    question: How many customers made at least one purchase in every year from 2009 to 2013?
+    gold_sql: SELECT COUNT(*) FROM (SELECT CustomerId FROM Invoice GROUP BY CustomerId HAVING COUNT(DISTINCT strftime('%Y', InvoiceDate)) = 5)
+    difficulty: hard
+    tags: [time, subquery]
+  - id: chk_094
+    question: Among artists with at least 10 tracks, which has the longest average track length?
+    gold_sql: SELECT ar.Name FROM Track t JOIN Album al ON t.AlbumId = al.AlbumId JOIN Artist ar ON al.ArtistId = ar.ArtistId GROUP BY ar.ArtistId HAVING COUNT(*) >= 10 ORDER BY AVG(t.Milliseconds) DESC LIMIT 1
+    difficulty: hard
+    tags: [join, ranking, filter]
+  - id: chk_095
+    question: What share of all tracks (as a percentage) does each media type account for?
+    gold_sql: SELECT m.Name, 100.0 * COUNT(*) / (SELECT COUNT(*) FROM Track) FROM Track t JOIN MediaType m ON t.MediaTypeId = m.MediaTypeId GROUP BY m.MediaTypeId
+    difficulty: hard
+    tags: [ratio, join, subquery]
+  - id: chk_096
+    question: How many invoices contain exactly one line item?
+    gold_sql: SELECT COUNT(*) FROM (SELECT InvoiceId FROM InvoiceLine GROUP BY InvoiceId HAVING COUNT(*) = 1)
+    difficulty: hard
+    tags: [subquery, aggregation]
+  - id: chk_097
+    question: What were the total sales per support representative per year? Give first name, last name, year and total, ordered by last name then year.
+    gold_sql: SELECT e.FirstName, e.LastName, strftime('%Y', i.InvoiceDate) AS year, SUM(i.Total) FROM Employee e JOIN Customer c ON c.SupportRepId = e.EmployeeId JOIN Invoice i ON i.CustomerId = c.CustomerId GROUP BY e.EmployeeId, year ORDER BY e.LastName, year
+    difficulty: hard
+    tags: [join, time, breakdown]
+  - id: chk_098
+    question: How many customers bought both Rock and Jazz tracks?
+    gold_sql: SELECT COUNT(*) FROM (SELECT i.CustomerId FROM Invoice i JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId WHERE g.Name IN ('Rock', 'Jazz') GROUP BY i.CustomerId HAVING COUNT(DISTINCT g.Name) = 2)
+    difficulty: hard
+    tags: [subquery, set]
+  - id: chk_099
+    question: What is the running total of revenue by year? Give year and cumulative revenue, ordered by year.
+    gold_sql: WITH y AS (SELECT strftime('%Y', InvoiceDate) AS year, SUM(Total) AS rev FROM Invoice GROUP BY year) SELECT year, SUM(rev) OVER (ORDER BY year) FROM y ORDER BY year
+    difficulty: hard
+    tags: [window, time]
+  - id: chk_100
+    question: Which genres have total sales revenue above 100?
+    gold_sql: SELECT g.Name FROM InvoiceLine il JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId GROUP BY g.GenreId HAVING SUM(il.UnitPrice * il.Quantity) > 100
+    difficulty: hard
+    tags: [join, filter]
+  - id: chk_101
+    question: How many albums contain tracks of more than one media type?
+    gold_sql: SELECT COUNT(*) FROM (SELECT AlbumId FROM Track GROUP BY AlbumId HAVING COUNT(DISTINCT MediaTypeId) > 1)
+    difficulty: hard
+    tags: [subquery, aggregation]
+  - id: chk_102
+    question: What is the second-highest distinct invoice total?
+    gold_sql: SELECT DISTINCT Total FROM Invoice ORDER BY Total DESC LIMIT 1 OFFSET 1
+    difficulty: hard
+    tags: [ranking]
+  - id: chk_103
+    question: Which customers bought tracks from more than 10 different artists? Give first and last names.
+    gold_sql: SELECT c.FirstName, c.LastName FROM Customer c JOIN Invoice i ON i.CustomerId = c.CustomerId JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId JOIN Album al ON t.AlbumId = al.AlbumId GROUP BY c.CustomerId HAVING COUNT(DISTINCT al.ArtistId) > 10
+    difficulty: hard
+    tags: [join, filter]
+  - id: chk_104
+    question: For each year, what was the best-selling genre by revenue? Give year and genre, ordered by year.
+    gold_sql: WITH gy AS (SELECT strftime('%Y', i.InvoiceDate) AS year, g.Name AS genre, SUM(il.UnitPrice * il.Quantity) AS rev, RANK() OVER (PARTITION BY strftime('%Y', i.InvoiceDate) ORDER BY SUM(il.UnitPrice * il.Quantity) DESC) AS rk FROM Invoice i JOIN InvoiceLine il ON il.InvoiceId = i.InvoiceId JOIN Track t ON il.TrackId = t.TrackId JOIN Genre g ON t.GenreId = g.GenreId GROUP BY year, g.GenreId) SELECT year, genre FROM gy WHERE rk = 1 ORDER BY year
+    difficulty: hard
+    tags: [window, time, ranking]
+  - id: chk_105
+    question: What fraction of customers have made purchases totaling more than 40? Answer as a percentage.
+    gold_sql: SELECT 100.0 * COUNT(*) / (SELECT COUNT(*) FROM Customer) FROM (SELECT CustomerId FROM Invoice GROUP BY CustomerId HAVING SUM(Total) > 40)
+    difficulty: hard
+    tags: [ratio, subquery]

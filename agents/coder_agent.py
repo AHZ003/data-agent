@@ -1,20 +1,19 @@
-"""Coder Agent - SQL/Python code generation and execution."""
+"""Coder Agent - SQL generation, guarded execution and self-repair."""
 
-import json
 import re
-from google import genai
-from google.genai import types as genai_types
 import pandas as pd
 from typing import Optional, Tuple
 
 from config import (
-    GOOGLE_API_KEY,
-    MODEL_NAME,
+    model_for,
     CODER_AGENT_SYSTEM_PROMPT,
     MAX_QUERY_ROWS,
     MAX_RETRY_ATTEMPTS,
 )
+from core import injection, llm, pii
 from core.database import Database
+from core.datasource import DataSource
+import prompts as prompt_registry
 from models.analysis_plan import SemanticSchema, CodeResult
 
 
@@ -26,21 +25,54 @@ QUOTA_SENTINEL = "QuotaExhausted"
 _QUOTA_PATTERNS = ("RESOURCE_EXHAUSTED", "429", "quota", "rate limit", "rate_limit")
 
 
+# An invalid or unauthorized API key is just as terminal as a quota
+# error: every retry fails the same way.
+AUTH_SENTINEL = "ProviderAuthError"
+_AUTH_PATTERNS = ("API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED", "UNAUTHENTICATED")
+
+
 def _is_quota_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(p.lower() in msg for p in _QUOTA_PATTERNS)
 
 
-def _build_sql_prompt(question: str, schema: SemanticSchema) -> str:
-    """Build the prompt for SQL generation."""
-    schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
-    system = CODER_AGENT_SYSTEM_PROMPT.format(
-        max_rows=MAX_QUERY_ROWS, table_name=schema.table_name
-    )
-    return f"""{system}
+def _is_auth_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(p.lower() in msg for p in _AUTH_PATTERNS)
 
-DATASET SCHEMA:
-{schema_desc}
+
+def is_terminal_error(error: str) -> bool:
+    """True when a CodeResult error means retrying cannot help.
+
+    A query that needs the user's cost confirmation (BigQuery) is terminal
+    too: the caller must ask, not the LLM.
+    """
+    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL)) or "CostConfirmationRequired" in error
+
+
+# Bump when _build_sql_prompt's layout changes: it is part of the
+# benchmark cache key alongside the prompt file's SHA.
+PROMPT_BUILDER_VERSION = 4
+
+
+def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
+    """Build the prompt for SQL generation from the DataSource (+ retrieval context)."""
+    system = CODER_AGENT_SYSTEM_PROMPT.format(
+        max_rows=MAX_QUERY_ROWS,
+        dialect=datasource.dialect.capitalize(),
+        dialect_notes=prompt_registry.get(f"dialect_{datasource.dialect}"),
+    )
+    # What leaves the machine: PII samples masked (or all samples dropped in
+    # local-only mode), instruction-like values neutralized, data delimited.
+    shown = pii.mask_datasource(injection.sanitize_datasource(datasource))
+    schema = injection.wrap("schema", shown.to_prompt())
+    notice = f"\n\n{injection.DATA_NOTICE}" if injection.enabled() else ""
+    extra = context.render() if context is not None else ""
+    extra = f"\n\n{extra}" if extra else ""
+    return f"""{system}{notice}
+
+DATABASE SCHEMA:
+{schema}{extra}
 
 USER QUESTION: {question}
 
@@ -69,8 +101,7 @@ def _check_unsupported_functions(sql: str) -> Optional[str]:
         "(SUM(x*y) - SUM(x)*SUM(y)/COUNT(*)) / "
         "(SQRT((SUM(x*x) - SUM(x)*SUM(x)/COUNT(*)) * "
         "(SUM(y*y) - SUM(y)*SUM(y)/COUNT(*)))). "
-        "For stddev use: SQRT(AVG(x*x) - AVG(x)*AVG(x)). "
-        "Do NOT use table aliases. Query directly from the table."
+        "For stddev use: SQRT(AVG(x*x) - AVG(x)*AVG(x))."
     )
 
 
@@ -91,24 +122,20 @@ def _extract_sql(response_text: str) -> str:
     return cleaned.strip()
 
 
-def _generate_sql(question: str, schema: SemanticSchema, error_context: str = "") -> str:
-    """Generate SQL using Gemini API."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-
-    prompt = _build_sql_prompt(question, schema)
+def _generate_sql(
+    question: str,
+    datasource: DataSource,
+    error_context: str = "",
+    model: Optional[str] = None,
+    context=None,
+) -> str:
+    """Generate SQL with the configured model (Gemini or a local Ollama model)."""
+    prompt = _build_sql_prompt(question, datasource, context)
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
-
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=1024,
-        ),
-    )
-
-    return _extract_sql(response.text)
+    text = llm.generate(prompt, model=model or model_for("coder"), temperature=0.0,
+                        max_output_tokens=1024, retry_rate_limits=True)
+    return _extract_sql(text)
 
 
 def _pandas_correlation(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
@@ -284,81 +311,74 @@ def execute_analysis(
                 columns=list(corr_df.columns),
             )
 
+    from retrieval.pipeline import default_retriever
+
+    return generate_and_execute(question, db, retriever=default_retriever())
+
+
+def generate_and_execute(
+    question: str,
+    db: Database,
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+    model: Optional[str] = None,
+    retriever=None,
+) -> Tuple[Optional[pd.DataFrame], CodeResult]:
+    """Text-to-SQL with self-repair: generate, guard, execute, retry on error.
+
+    Each failed attempt feeds the SQL and its error back into the next
+    prompt. `max_attempts=1` disables repair (the benchmarks' "single"
+    mode). Quota and auth errors return immediately with a sentinel.
+    With a `retriever` (retrieval/pipeline.py) the prompt gets a pruned
+    schema, value hints, metric definitions and few-shot examples.
+    This is the whole SQL path — the app and the benchmarks both use it.
+    """
+    context = None
+    if retriever is not None:
+        datasource, context = retriever.prepare(question, db)
+    else:
+        datasource = db.datasource()
     last_error = ""
     last_sql = ""
-    for attempt in range(MAX_RETRY_ATTEMPTS):
+    for attempt in range(1, max_attempts + 1):
         try:
-            sql = _generate_sql(question, schema, error_context=last_error)
+            sql = _generate_sql(question, datasource, error_context=last_error, model=model, context=context)
             last_sql = sql
 
-            unsupported = _check_unsupported_functions(sql)
+            unsupported = _check_unsupported_functions(sql) if db.dialect == "sqlite" else None
             if unsupported:
                 last_error = unsupported
                 continue
 
             result_df, error = db.execute_query(sql)
 
+            if error and error.startswith("CostConfirmationRequired"):
+                return None, CodeResult(sql_query=sql, success=False, error=error, attempts=attempt)
             if error:
                 last_error = f"SQL: {sql}\nError: {error}"
                 continue
 
-            code_result = CodeResult(
+            return result_df, CodeResult(
                 sql_query=sql,
                 success=True,
                 row_count=len(result_df) if result_df is not None else 0,
                 columns=list(result_df.columns) if result_df is not None else [],
+                attempts=attempt,
             )
-            return result_df, code_result
 
         except Exception as e:
-            if _is_quota_error(e):
+            if _is_quota_error(e) or _is_auth_error(e):
+                sentinel = QUOTA_SENTINEL if _is_quota_error(e) else AUTH_SENTINEL
                 return None, CodeResult(
                     sql_query="",
                     success=False,
-                    error=f"{QUOTA_SENTINEL}: {e}",
+                    error=f"{sentinel}: {e}",
+                    attempts=attempt,
                 )
             last_error = str(e)
 
     return None, CodeResult(
         sql_query=last_sql,
         success=False,
-        error=f"Failed after {MAX_RETRY_ATTEMPTS} attempts. Last error: {last_error}",
+        error=f"Failed after {max_attempts} attempts. Last error: {last_error}",
+        attempts=max_attempts,
     )
-
-
-def generate_python_code(
-    question: str, schema: SemanticSchema, context: str = ""
-) -> str:
-    """Generate Python analysis code for complex tasks that can't be done in SQL."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
-
-    schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
-    prompt = f"""You are a Python data analysis expert. Given a dataset schema and question,
-write Python code using pandas, numpy, scipy, or sklearn.
-
-The DataFrame is available as the variable `df`.
-Store the final result in a variable called `result`.
-
-SCHEMA:
-{schema_desc}
-
-{f"ADDITIONAL CONTEXT: {context}" if context else ""}
-
-QUESTION: {question}
-
-Write ONLY the Python code:"""
-
-    response = client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            temperature=0.0,
-            max_output_tokens=2048,
-        ),
-    )
-
-    text = response.text
-    match = re.search(r"```(?:python)?\s*(.*?)```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
