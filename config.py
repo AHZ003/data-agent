@@ -18,6 +18,7 @@ TEMPERATURE = 0.0
 SQLITE_DB_NAME = ":memory:"
 DEFAULT_TABLE_NAME = "uploaded_data"
 MAX_QUERY_ROWS = 1000
+QUERY_TIMEOUT_SECONDS = float(os.getenv("DATAAGENT_QUERY_TIMEOUT", "10"))
 
 # --- Agent Configuration ---
 MAX_RETRY_ATTEMPTS = 3

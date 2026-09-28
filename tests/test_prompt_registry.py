@@ -47,10 +47,11 @@ def test_config_constants_match_registry():
 
 
 def test_coder_prompt_still_has_placeholders():
-    """The coder prompt is `.format()`ed with table_name / max_rows.
-    Removing these placeholders would cause a runtime KeyError in
-    coder_agent — pin them here so prompt edits catch it.
+    """The coder prompt is `.format()`ed with dialect / max_rows.
+    An unknown placeholder would raise KeyError in coder_agent at
+    runtime — pin the contract here so prompt edits catch it.
     """
     body = get("coder_agent")
-    assert "{table_name}" in body
+    assert "{dialect}" in body
     assert "{max_rows}" in body
+    body.format(dialect="Sqlite", max_rows=10)
