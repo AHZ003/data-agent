@@ -48,15 +48,22 @@ def is_terminal_error(error: str) -> bool:
     return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL))
 
 
-def _build_sql_prompt(question: str, datasource: DataSource) -> str:
-    """Build the prompt for SQL generation from every table in the DataSource."""
+# Bump when _build_sql_prompt's layout changes: it is part of the
+# benchmark cache key alongside the prompt file's SHA.
+PROMPT_BUILDER_VERSION = 2
+
+
+def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
+    """Build the prompt for SQL generation from the DataSource (+ retrieval context)."""
     system = CODER_AGENT_SYSTEM_PROMPT.format(
         max_rows=MAX_QUERY_ROWS, dialect=datasource.dialect.capitalize()
     )
+    extra = context.render() if context is not None else ""
+    extra = f"\n\n{extra}" if extra else ""
     return f"""{system}
 
 DATABASE SCHEMA:
-{datasource.to_prompt()}
+{datasource.to_prompt()}{extra}
 
 USER QUESTION: {question}
 
@@ -111,12 +118,13 @@ def _generate_sql(
     datasource: DataSource,
     error_context: str = "",
     model: Optional[str] = None,
+    context=None,
 ) -> str:
     """Generate SQL using Gemini API."""
     client = genai.Client(api_key=current_api_key())
     model = model or MODEL_NAME
 
-    prompt = _build_sql_prompt(question, datasource)
+    prompt = _build_sql_prompt(question, datasource, context)
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
 
@@ -317,20 +325,27 @@ def generate_and_execute(
     db: Database,
     max_attempts: int = MAX_RETRY_ATTEMPTS,
     model: Optional[str] = None,
+    retriever=None,
 ) -> Tuple[Optional[pd.DataFrame], CodeResult]:
     """Text-to-SQL with self-repair: generate, guard, execute, retry on error.
 
     Each failed attempt feeds the SQL and its error back into the next
     prompt. `max_attempts=1` disables repair (the benchmarks' "single"
     mode). Quota and auth errors return immediately with a sentinel.
+    With a `retriever` (retrieval/pipeline.py) the prompt gets a pruned
+    schema, value hints, metric definitions and few-shot examples.
     This is the whole SQL path — the app and the benchmarks both use it.
     """
-    datasource = db.datasource()
+    context = None
+    if retriever is not None:
+        datasource, context = retriever.prepare(question, db)
+    else:
+        datasource = db.datasource()
     last_error = ""
     last_sql = ""
     for attempt in range(1, max_attempts + 1):
         try:
-            sql = _generate_sql(question, datasource, error_context=last_error, model=model)
+            sql = _generate_sql(question, datasource, error_context=last_error, model=model, context=context)
             last_sql = sql
 
             unsupported = _check_unsupported_functions(sql)

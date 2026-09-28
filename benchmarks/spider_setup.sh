@@ -9,16 +9,18 @@
 #     dev.json          # 1,034 (question, gold SQL, db_id) triples
 #     database/         # 166 SQLite databases
 #     tables.json       # schema metadata for every database
+#     train_spider.json, train_others.json
+#                       # train split: only used to build few-shot query
+#                       # memory (retrieval/memory.py), never for eval
 #
 # Size: ~95 MB compressed, ~300 MB uncompressed.
-# Only the dev set is used — the training set is not downloaded.
 
 set -euo pipefail
 
 DEST="$(cd "$(dirname "$0")" && pwd)/spider"
 ZIP_URL="https://drive.usercontent.google.com/download?id=1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J&export=download&confirm=t"
 
-if [ -f "$DEST/dev.json" ] && [ -d "$DEST/database" ]; then
+if [ -f "$DEST/dev.json" ] && [ -d "$DEST/database" ] && [ -f "$DEST/train_spider.json" ]; then
     echo "Spider dev set already present at $DEST — skipping download."
     echo "To force re-download, remove $DEST and re-run."
     exit 0
@@ -52,8 +54,11 @@ INNER_DIR="$(dirname "$INNER")"
 
 mv "$INNER_DIR/dev.json" "$DEST/dev.json"
 mv "$INNER_DIR/tables.json" "$DEST/tables.json" 2>/dev/null || true
+mv "$INNER_DIR/train_spider.json" "$DEST/train_spider.json" 2>/dev/null || true
+mv "$INNER_DIR/train_others.json" "$DEST/train_others.json" 2>/dev/null || true
 
 # The database directory may be called database/ or databases/
+rm -rf "$DEST/database"
 if [ -d "$INNER_DIR/database" ]; then
     mv "$INNER_DIR/database" "$DEST/database"
 elif [ -d "$INNER_DIR/databases" ]; then

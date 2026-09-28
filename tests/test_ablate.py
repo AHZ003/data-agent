@@ -44,3 +44,14 @@ def test_shipped_ablations_yaml_parses():
     from benchmarks.ablate import DEFAULT_YAML
     runs = load_runs(DEFAULT_YAML)
     assert {r["benchmark"] for r in runs} <= {"spider", "bird"}
+
+
+def test_explicit_baseline_field():
+    runs = [{"name": "single", "benchmark": "bird"}, {"name": "repair", "benchmark": "bird"},
+            {"name": "values", "benchmark": "bird", "baseline": "repair"}]
+    res = {"single": _res("s", [False] * 10), "repair": _res("r", [True] * 5 + [False] * 5),
+           "values": _res("v", [True] * 8 + [False] * 2)}
+    by = {r["name"]: r for r in compare(runs, res)}
+    assert by["values"]["baseline"] == "repair"
+    assert by["values"]["delta"] == pytest.approx(0.3)
+    assert by["repair"]["baseline"] == "single"

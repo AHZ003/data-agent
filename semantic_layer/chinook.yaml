@@ -1,0 +1,33 @@
+# Business definitions for the Chinook sample workspace.
+datasource: chinook
+
+metrics:
+  - name: revenue
+    description: Money received from track sales, summed over invoice lines
+    synonyms: [sales, earned, earnings, income, sold, bestselling, best-selling]
+    sql: SUM("InvoiceLine"."UnitPrice" * "InvoiceLine"."Quantity")
+  - name: invoice_revenue
+    description: Revenue at invoice level (use for questions about invoices, billing country or customers' totals)
+    synonyms: [spending, spent, billed, invoice total]
+    sql: SUM("Invoice"."Total")
+  - name: units_sold
+    description: Number of track purchases
+    synonyms: [purchases, bought, downloads, units]
+    sql: SUM("InvoiceLine"."Quantity")
+  - name: average_order_value
+    description: Mean invoice total
+    synonyms: [aov, average invoice, average order, basket size]
+    sql: AVG("Invoice"."Total")
+  - name: track_minutes
+    description: Track length in minutes
+    synonyms: [duration, length, running time, long]
+    sql: '"Track"."Milliseconds" / 60000.0'
+
+columns:
+  Invoice.Total: Invoice amount in USD (sum of its lines)
+  Invoice.BillingCountry: Country the invoice was billed to (may differ from the customer's country)
+  InvoiceLine.UnitPrice: Price paid per track on this invoice, USD
+  Track.UnitPrice: Current catalog price of the track, USD (not what customers paid)
+  Track.Milliseconds: Track length in milliseconds
+  Customer.SupportRepId: The employee who is this customer's support representative
+  Employee.ReportsTo: The employee's manager

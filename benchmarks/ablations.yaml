@@ -1,7 +1,7 @@
 # Ablation configs for `python -m benchmarks.ablate`.
 #
-# Within a benchmark, the FIRST run is the baseline; every other run is
-# compared to it on the same questions (paired Δ + McNemar p).
+# Each run is compared on the same questions (paired Δ + McNemar p) with
+# its `baseline:` run, or, if unset, the first run of its benchmark.
 # `subset` + `seed` pick a fixed difficulty-stratified sample, so all
 # runs of a benchmark see identical questions.
 #
@@ -39,3 +39,40 @@ runs:
     model: gemini-2.5-flash
     mode: repair
     evidence: false
+
+  # ── BIRD: retrieval components, each vs. the repair baseline ─────────
+  - name: bird-flash-values
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+    baseline: bird-flash-evidence-repair
+    flags: {values: true, embedder: gemini}
+  - name: bird-flash-schema30
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+    baseline: bird-flash-evidence-repair
+    flags: {schema_k: 30, embedder: gemini}
+  - name: bird-flash-schema30-values
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+    baseline: bird-flash-evidence-repair
+    flags: {schema_k: 30, values: true, embedder: gemini}
+  - name: bird-flash-memory3
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+    baseline: bird-flash-evidence-repair
+    flags: {memory_k: 3, embedder: gemini}
+  - name: bird-flash-all-retrieval
+    benchmark: bird
+    model: gemini-2.5-flash
+    mode: repair
+    evidence: true
+    baseline: bird-flash-evidence-repair
+    flags: {schema_k: 30, values: true, memory_k: 3, embedder: gemini}
