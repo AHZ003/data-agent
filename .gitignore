@@ -15,3 +15,5 @@ build/
 benchmarks/spider/
 benchmarks/bird/
 outputs/checkpoints.sqlite*
+training/data/
+training/outputs/
