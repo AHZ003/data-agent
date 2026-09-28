@@ -6,8 +6,9 @@ from google import genai
 from google.genai import types as genai_types
 from typing import Iterator, List, Dict, Any, Optional
 
-from config import GOOGLE_API_KEY, MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
+from config import MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
 from core import tracing
+from core.llm import current_api_key
 from models.report import AnalysisReport, ReportSection
 
 
@@ -48,7 +49,7 @@ def generate_narrative(
     prediction_info: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generate a plain-English narrative for a single analysis step (blocking)."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
@@ -79,7 +80,7 @@ def stream_narrative(
     word-chunker. Callers like `st.write_stream` can consume this
     iterator directly.
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
     prompt = _build_narrative_prompt(
         question, sql_query, result_summary,
         chart_description, validation_warnings, prediction_info,
@@ -115,7 +116,7 @@ def generate_full_report(
     - analyses: list of {question, sql, result_summary, narrative, warnings}
     - predictions: list of prediction results (optional)
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
 
     analyses = session_data.get("analyses", [])
     predictions = session_data.get("predictions", [])

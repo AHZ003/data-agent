@@ -6,8 +6,9 @@ from PIL import Image
 import io
 from typing import Optional, Tuple
 
-from config import GOOGLE_API_KEY, MODEL_NAME, VISION_EXTRACTION_PROMPT
+from config import MODEL_NAME, VISION_EXTRACTION_PROMPT
 from core import tracing
+from core.llm import current_api_key
 
 
 def extract_table_from_image(
@@ -18,7 +19,7 @@ def extract_table_from_image(
 
     Returns: (csv_string, error_message)
     """
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
 
     try:
         image = Image.open(io.BytesIO(image_bytes))

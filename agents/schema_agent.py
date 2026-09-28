@@ -8,13 +8,13 @@ from google.genai import types as genai_types
 from typing import List
 
 from config import (
-    GOOGLE_API_KEY,
     MODEL_NAME,
     SCHEMA_AGENT_SYSTEM_PROMPT,
     SUGGESTED_QUESTIONS_PROMPT,
     DEFAULT_TABLE_NAME,
 )
 from core import tracing
+from core.llm import current_api_key
 from models.analysis_plan import ColumnProfile, ColumnRole, SemanticSchema
 
 _SUGGESTION_CACHE: dict = {}
@@ -133,7 +133,7 @@ def _generate_suggested_questions(
     schema: SemanticSchema,
 ) -> List[str]:
     """Use Gemini to generate suggested questions for the dataset."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
 
     schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
 

@@ -1,0 +1,53 @@
+name: Deploy to Cloud Run
+
+# Deploys main after tests pass. Authenticates with Workload Identity
+# Federation (no JSON keys); see deploy/cloudrun.md for the one-time setup.
+# Skipped until the GCP_* repository variables exist.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # GitHub OIDC token for Workload Identity Federation
+
+jobs:
+  test:
+    if: vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest tests/ -q
+        env:
+          GOOGLE_API_KEY: dummy-for-ci
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy
+        run: |
+          gcloud run deploy dataagent --source . \
+            --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" \
+            --allow-unauthenticated \
+            --max-instances 2 --min-instances 0 --memory 2Gi --cpu 1 --timeout 300 \
+            --set-secrets GOOGLE_API_KEY=gemini-api-key:latest \
+            --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10 \
+            --quiet

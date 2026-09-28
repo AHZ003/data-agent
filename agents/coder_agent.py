@@ -7,14 +7,13 @@ import pandas as pd
 from typing import Optional, Tuple
 
 from config import (
-    GOOGLE_API_KEY,
     MODEL_NAME,
     CODER_AGENT_SYSTEM_PROMPT,
     MAX_QUERY_ROWS,
     MAX_RETRY_ATTEMPTS,
 )
 from core import tracing
-from core.llm import with_rate_limit_backoff
+from core.llm import current_api_key, with_rate_limit_backoff
 from core.database import Database
 from core.datasource import DataSource
 from models.analysis_plan import SemanticSchema, CodeResult
@@ -114,7 +113,7 @@ def _generate_sql(
     model: Optional[str] = None,
 ) -> str:
     """Generate SQL using Gemini API."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
     model = model or MODEL_NAME
 
     prompt = _build_sql_prompt(question, datasource)

@@ -8,13 +8,13 @@ import pandas as pd
 from typing import Optional, List
 
 from config import (
-    GOOGLE_API_KEY,
     MODEL_NAME,
     CRITIC_AGENT_SYSTEM_PROMPT,
     CRITIC_CONFIDENCE_THRESHOLD_WARN,
     CRITIC_CONFIDENCE_THRESHOLD_REJECT,
 )
 from core import tracing
+from core.llm import current_api_key
 from models.analysis_plan import ValidationReport, ValidationStatus, SemanticSchema
 from models.chart_config import ChartConfig, ChartType
 from core import stats as da_stats
@@ -212,7 +212,7 @@ def llm_validate(
     schema: SemanticSchema,
 ) -> ValidationReport:
     """Use Gemini to validate the overall analysis quality."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
+    client = genai.Client(api_key=current_api_key())
 
     schema_desc = json.dumps(schema.model_dump(), indent=2, default=str)
 
