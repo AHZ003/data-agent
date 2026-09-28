@@ -7,6 +7,7 @@ import pandas as pd
 from typing import Optional, Tuple
 
 from config import (
+from core import tracing
     GOOGLE_API_KEY,
     MODEL_NAME,
     CODER_AGENT_SYSTEM_PROMPT,
@@ -121,6 +122,7 @@ def _generate_sql(question: str, datasource: DataSource, error_context: str = ""
             max_output_tokens=1024,
         ),
     )
+    tracing.record_usage(response, MODEL_NAME)
 
     return _extract_sql(response.text)
 

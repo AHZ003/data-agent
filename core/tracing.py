@@ -173,6 +173,8 @@ def span(
             meta.update(kwargs)
 
     handle = _Handle()
+    stack = _span_stack()
+    stack.append(handle)
     try:
         yield handle
     except Exception as e:
@@ -198,6 +200,74 @@ def span(
         )
         _write(asdict(span_obj))
         _ctx.parent_id = parent
+        stack.pop()
+
+
+# ── LLM usage accounting ─────────────────────────────────────────────────
+
+def _span_stack() -> list:
+    if not hasattr(_ctx, "span_stack"):
+        _ctx.span_stack = []
+    return _ctx.span_stack
+
+
+def _scope_stack() -> list:
+    if not hasattr(_ctx, "usage_scopes"):
+        _ctx.usage_scopes = []
+    return _ctx.usage_scopes
+
+
+@dataclass
+class Usage:
+    """Tokens and cost accumulated inside a usage_scope()."""
+    calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
+
+
+@contextmanager
+def usage_scope():
+    """Collect LLM usage from every call made in this thread while open.
+
+        with tracing.usage_scope() as u:
+            run_something()
+        print(u.tokens_in, u.cost_usd)
+
+    Scopes nest; each open scope sees every call.
+    """
+    usage = Usage()
+    stack = _scope_stack()
+    stack.append(usage)
+    try:
+        yield usage
+    finally:
+        stack.remove(usage)
+
+
+def record_usage(response: Any, model: Optional[str] = None) -> None:
+    """Attribute a Gemini response's token usage to the open span and scopes.
+
+    Reads `response.usage_metadata`; thinking tokens are billed as
+    output, so they count toward tokens_out. Responses without usage
+    metadata (e.g. cassette fakes) are ignored.
+    """
+    um = getattr(response, "usage_metadata", None)
+    if um is None:
+        return
+    tin = int(getattr(um, "prompt_token_count", 0) or 0)
+    tout = int(getattr(um, "candidates_token_count", 0) or 0) + int(
+        getattr(um, "thoughts_token_count", 0) or 0
+    )
+    stack = _span_stack()
+    if stack:
+        stack[-1].set_tokens(in_=tin, out_=tout)
+    cost = _cost_usd(model or "default", tin, tout)
+    for usage in _scope_stack():
+        usage.calls += 1
+        usage.tokens_in += tin
+        usage.tokens_out += tout
+        usage.cost_usd = round(usage.cost_usd + cost, 6)
 
 
 # ── Query API (for a future trace-viewer UI) ─────────────────────────────

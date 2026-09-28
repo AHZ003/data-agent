@@ -7,6 +7,7 @@ from google.genai import types as genai_types
 from typing import List
 
 from config import GOOGLE_API_KEY, MODEL_NAME, PLANNER_AGENT_SYSTEM_PROMPT
+from core import tracing
 from models.analysis_plan import (
     AnalysisPlan,
     AnalysisType,
@@ -58,6 +59,7 @@ Return ONLY the JSON object:"""
                 max_output_tokens=1024,
             ),
         )
+        tracing.record_usage(response, MODEL_NAME)
         text = response.text.strip()
     except Exception:
         return _fallback_plan(question)
