@@ -50,6 +50,8 @@ def _trace_path() -> Path:
 
 
 def _cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+    if model.startswith("ollama/"):
+        return 0.0  # no API bill; see core/llm.py for hardware-time costing
     rates = MODEL_PRICING.get(model) or MODEL_PRICING["default"]
     return round(
         (tokens_in / 1_000_000) * rates["in"] + (tokens_out / 1_000_000) * rates["out"],
@@ -245,7 +247,7 @@ def usage_scope():
         stack.remove(usage)
 
 
-def record_usage(response: Any, model: Optional[str] = None) -> None:
+def record_usage(response: Any, model: Optional[str] = None, usd: Optional[float] = None) -> None:
     """Attribute a Gemini response's token usage to the open span and scopes.
 
     Reads `response.usage_metadata`; thinking tokens are billed as
@@ -262,7 +264,8 @@ def record_usage(response: Any, model: Optional[str] = None) -> None:
     stack = _span_stack()
     if stack:
         stack[-1].set_tokens(in_=tin, out_=tout)
-    cost = _cost_usd(model or "default", tin, tout)
+    # `usd` overrides token pricing (local models: amortized hardware time).
+    cost = usd if usd is not None else _cost_usd(model or "default", tin, tout)
     for usage in _scope_stack():
         usage.calls += 1
         usage.tokens_in += tin

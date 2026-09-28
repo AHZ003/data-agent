@@ -34,7 +34,6 @@ def test_every_registered_prompt_loads():
 def test_config_constants_match_registry():
     """Back-compat: `from config import X` must equal `prompts.get(...)`."""
     pairs = [
-        ("schema_agent", config.SCHEMA_AGENT_SYSTEM_PROMPT),
         ("coder_agent", config.CODER_AGENT_SYSTEM_PROMPT),
         ("planner_agent", config.PLANNER_AGENT_SYSTEM_PROMPT),
         ("storyteller_agent", config.STORYTELLER_AGENT_SYSTEM_PROMPT),

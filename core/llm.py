@@ -1,4 +1,15 @@
-"""Shared helpers for calling the LLM provider.
+"""The one place DataAgent calls a language model.
+
+`generate()` / `generate_stream()` route on the model name:
+
+  gemini-*          Google Gemini (google-genai SDK)
+  ollama/<model>    a local model served by Ollama (OLLAMA_HOST)
+
+so any agent can run on any backend (per-agent override:
+DATAAGENT_MODEL_<AGENT>, see config.model_for). Every call records tokens
+and cost on the open tracing span and usage scopes. Local models have no
+API bill; their cost is amortized hardware time, OLLAMA_USD_PER_HOUR x
+generation seconds (default 0 — state the rate you assume when reporting).
 
 Rate limits vs. quota exhaustion
 --------------------------------
@@ -13,12 +24,18 @@ normal terminal handling applies.
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import time
+import urllib.request
 from contextlib import contextmanager
 from contextvars import ContextVar
+from types import SimpleNamespace
 from typing import Callable, Iterator, Optional, TypeVar
+
+from google import genai
+from google.genai import types as genai_types
 
 T = TypeVar("T")
 
@@ -67,4 +84,82 @@ def api_key_override(key: Optional[str]) -> Iterator[None]:
         yield
     finally:
         _api_key.reset(token)
+
+
+# ── Generation ──────────────────────────────────────────────────────────
+
+def _is_rate_limit(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(p in msg for p in ("resource_exhausted", "429", "quota", "rate limit", "rate_limit"))
+
+
+def generate(
+    prompt,
+    *,
+    model: Optional[str] = None,
+    temperature: float = 0.0,
+    max_output_tokens: int = 1024,
+    retry_rate_limits: bool = False,
+) -> str:
+    """Text completion. `retry_rate_limits` enables the batch backoff policy."""
+    from config import MODEL_NAME
+
+    model = model or MODEL_NAME
+    if model.startswith("ollama/"):
+        return _ollama(prompt, model, temperature, max_output_tokens)
+    client = genai.Client(api_key=current_api_key())
+    call = lambda: client.models.generate_content(  # noqa: E731
+        model=model, contents=prompt,
+        config=genai_types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_output_tokens),
+    )
+    response = with_rate_limit_backoff(call, _is_rate_limit) if retry_rate_limits else call()
+    _record(response, model)
+    return response.text
+
+
+def generate_stream(
+    prompt, *, model: Optional[str] = None, temperature: float = 0.0, max_output_tokens: int = 1024,
+) -> Iterator[str]:
+    """Token stream. Ollama models yield the whole answer as one chunk."""
+    from config import MODEL_NAME
+
+    model = model or MODEL_NAME
+    if model.startswith("ollama/"):
+        yield _ollama(prompt, model, temperature, max_output_tokens)
+        return
+    client = genai.Client(api_key=current_api_key())
+    last = None
+    for chunk in client.models.generate_content_stream(
+        model=model, contents=prompt,
+        config=genai_types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_output_tokens),
+    ):
+        last = chunk
+        text = getattr(chunk, "text", None)
+        if text:
+            yield text
+    # Streamed usage metadata is cumulative; the last chunk has the total.
+    _record(last, model)
+
+
+def _record(response, model: str) -> None:
+    from core import tracing
+    tracing.record_usage(response, model)
+
+
+def _ollama(prompt: str, model: str, temperature: float, max_tokens: int) -> str:
+    from core import tracing
+
+    host = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+    body = json.dumps({"model": model.split("/", 1)[1], "prompt": prompt, "stream": False,
+                       "options": {"temperature": temperature, "num_predict": max_tokens}}).encode()
+    req = urllib.request.Request(f"{host}/api/generate", data=body, headers={"Content-Type": "application/json"})
+    start = time.monotonic()
+    with urllib.request.urlopen(req, timeout=float(os.getenv("OLLAMA_TIMEOUT", "300"))) as resp:
+        data = json.loads(resp.read())
+    seconds = time.monotonic() - start
+    usd = seconds * float(os.getenv("OLLAMA_USD_PER_HOUR", "0")) / 3600
+    usage = SimpleNamespace(prompt_token_count=data.get("prompt_eval_count", 0),
+                            candidates_token_count=data.get("eval_count", 0), thoughts_token_count=0)
+    tracing.record_usage(SimpleNamespace(usage_metadata=usage), model, usd=usd)
+    return data.get("response", "")
 
