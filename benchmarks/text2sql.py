@@ -32,6 +32,9 @@ from typing import Callable, Iterable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLD_TIMEOUT_S = 60.0
+# Predicted-SQL timeout for benchmark runs; matches BIRD's official
+# evaluator (meta_time_out=30). The app's interactive default is lower.
+PRED_TIMEOUT_S = 30.0
 
 
 @dataclass
@@ -198,6 +201,7 @@ def run_example(ex: Example, db_path: Path, cfg: RunConfig, rule: str) -> Exampl
 
     db = Database.from_sqlite(str(db_path), name=ex.db_id, datasource=_DS_CACHE.get(db_path))
     db.max_rows = max(MAX_QUERY_ROWS, len(gold_rows or []) + 1)  # never truncate below gold
+    db.timeout_seconds = PRED_TIMEOUT_S
     start = time.time()
     with tracing.usage_scope() as usage:
         result_df, code = generate_and_execute(

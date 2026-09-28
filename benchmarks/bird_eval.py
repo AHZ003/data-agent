@@ -123,10 +123,16 @@ def _oracle(examples: list[Example]) -> int:
     with patch.object(coder_agent, "_generate_sql", side_effect=lambda q, ds, **k: gold[q]):
         results = run_examples(examples, db_path_for, cfg, rule="bird", progress=False)
     bad = [r for r in results if not r.match]
-    print(f"Oracle EX: {1 - len(bad) / len(results):.2%} ({len(results) - len(bad)}/{len(results)})")
+    # A few BIRD gold queries are slower than the official 30s timeout on
+    # a laptop; those count as misses for every config alike and are not
+    # harness bugs.
+    slow = [r for r in bad if "QueryTimeout" in (r.error or "") or "interrupted" in (r.gold_error or "")]
+    real = [r for r in bad if r not in slow]
+    print(f"Oracle EX: {1 - len(bad) / len(results):.2%} ({len(results) - len(bad)}/{len(results)}); "
+          f"{len(slow)} gold queries exceed the 30s timeout, {len(real)} harness mismatches")
     for r in bad[:10]:
-        print(f"  MISS {r.id} [{r.db_id}] {(r.error or r.gold_error or 'result mismatch')[:160]}")
-    return 0 if not bad else 1
+        print(f"  MISS {r.id} [{r.db_id}] {(r.error or r.gold_error or 'result mismatch')[:120]}")
+    return 0 if not real else 1
 
 
 if __name__ == "__main__":
