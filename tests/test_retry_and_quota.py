@@ -215,3 +215,29 @@ def test_retry_bound_regression_full_loop(toy_schema, toy_db):
             assert iterations < 10, "retry loop didn't terminate — bug reintroduced"
 
     assert state["retry_count"] == 3
+
+
+# ── Invalid API key is terminal too ──────────────────────────────────────
+
+def test_coder_shortcircuits_on_invalid_api_key(toy_schema, toy_db):
+    from agents.coder_agent import AUTH_SENTINEL
+    call_count = {"n": 0}
+
+    def fake_generate_sql(*args, **kwargs):
+        call_count["n"] += 1
+        raise RuntimeError("400 INVALID_ARGUMENT. API key not valid. reason: API_KEY_INVALID")
+
+    with patch.object(coder_agent, "_generate_sql", side_effect=fake_generate_sql):
+        df, result = coder_agent.execute_analysis("q", toy_schema, toy_db)
+
+    assert call_count["n"] == 1
+    assert result.error.startswith(AUTH_SENTINEL)
+
+
+def test_should_retry_skips_on_auth_error():
+    state = {
+        "validation": {"status": "rejected"},
+        "retry_count": 1,
+        "error": "ProviderAuthError: API key not valid",
+    }
+    assert orchestrator.should_retry(state) == "continue"
