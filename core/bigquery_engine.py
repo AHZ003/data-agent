@@ -79,7 +79,9 @@ class BigQueryEngine(Engine):
         job = self.client.query(sql, job_config=self._job_config(dry_run=True, use_query_cache=False))
         return estimate(int(job.total_bytes_processed or 0))
 
-    def execute_query(self, sql: str, confirm_cost: bool = False) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def execute_query(
+        self, sql: str, max_rows: Optional[int] = None, confirm_cost: bool = False,
+    ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         try:
             safe_sql = _guard(sql, self.dialect)
         except SQLGuardError as e:
@@ -96,7 +98,7 @@ class BigQueryEngine(Engine):
             return None, f"{COST_SENTINEL}: query would scan {cost.fmt()}"
         try:
             job = self.client.query(safe_sql, job_config=self._job_config(maximum_bytes_billed=self.max_bytes))
-            rows = job.result(timeout=self.timeout_seconds, max_results=self.max_rows)
+            rows = job.result(timeout=self.timeout_seconds, max_results=max_rows or self.max_rows)
             return rows.to_dataframe(), None
         except Exception as e:
             return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"

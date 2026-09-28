@@ -45,26 +45,33 @@ graph TD;
 	visualizer(visualizer)
 	predictor(predictor)
 	storyteller(storyteller)
+	remember(remember)
 	decide_predict(decide_predict)
+	clarify(clarify)
+	confirm_cost(confirm_cost)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> schema;
-	coder --> visualizer;
+	clarify --> coder;
+	coder -.-> confirm_cost;
+	coder -.-> visualizer;
+	confirm_cost --> visualizer;
 	critic -. &nbsp;retry&nbsp; .-> coder;
 	critic -. &nbsp;continue&nbsp; .-> decide_predict;
 	decide_predict -.-> predictor;
 	decide_predict -.-> storyteller;
-	planner --> coder;
+	planner --> clarify;
 	predictor --> storyteller;
 	schema --> planner;
+	storyteller --> remember;
 	visualizer --> critic;
-	storyteller --> __end__;
+	remember --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
 ```
 <!-- GRAPH:END -->
 
-_Generated from the compiled graph by `scripts/export_graph.py`; CI fails if it drifts._
+_Generated from the compiled graph by `scripts/export_graph.py`; a test fails if it drifts. This is the API's interactive graph; the Streamlit app and the benchmarks run the same graph without the `clarify` and `confirm_cost` interrupt nodes._
 
 The orchestrator is a **LangGraph StateGraph** with conditional edges. Order: schema → planner → coder → visualizer → critic, then an optional predictor and the storyteller. The critic-to-coder retry loop is bounded (`retry_count` incremented per entry, capped at 3) and short-circuits on terminal errors (quota exhaustion). See the [postmortem](docs/postmortems/2026-04-13_eval_findings.md) for how we found and fixed the infinite-loop bug that this architecture prevented.
 

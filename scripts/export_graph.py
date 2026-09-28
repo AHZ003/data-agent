@@ -25,7 +25,9 @@ _README_BLOCK = re.compile(r"(<!-- GRAPH:BEGIN -->\n)(.*?)(<!-- GRAPH:END -->)",
 
 
 def render() -> str:
-    return build_graph().compile().get_graph().draw_mermaid()
+    # The interactive graph (API) is a superset of the plain one (app,
+    # benchmarks): it adds the clarify and confirm_cost interrupt nodes.
+    return build_graph(interactive=True).compile().get_graph().draw_mermaid()
 
 
 def main() -> int:

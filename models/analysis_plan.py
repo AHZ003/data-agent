@@ -68,6 +68,8 @@ class AnalysisPlan(BaseModel):
     question: str
     analysis_types: List[AnalysisType]
     steps: List[PlanStep]
+    # Set only when the answer hinges on a choice the user must make.
+    clarifying_question: Optional[str] = None
 
 
 # --- Coder Agent Models ---

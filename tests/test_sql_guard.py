@@ -238,3 +238,26 @@ def test_string_literals_never_trip_the_guard(literal):
 def test_random_dml_always_rejected(sql):
     with pytest.raises(SQLGuardError):
         _guard(sql)
+
+
+# ── Concurrency (regression: shared-connection deadlock in the API) ──────
+
+def test_concurrent_queries_on_one_connection_do_not_deadlock():
+    import concurrent.futures as cf
+    from core.demo import load_sample_workspace
+
+    db = load_sample_workspace()
+    sql = ('SELECT g."Name", COUNT(*) FROM "Track" t JOIN "Genre" g ON t."GenreId" = g."GenreId" '
+           'GROUP BY 1 ORDER BY 2 DESC')
+
+    def work(_):
+        for _ in range(20):
+            df, err = db.execute_query(sql, max_rows=5)
+            assert err is None and len(df) == 5
+        return True
+
+    with cf.ThreadPoolExecutor(8) as pool:
+        futures = [pool.submit(work, i) for i in range(8)]
+        done, not_done = cf.wait(futures, timeout=60)
+    assert not not_done, "queries on a shared connection deadlocked"
+    assert all(f.result() for f in done)

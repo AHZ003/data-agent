@@ -39,7 +39,6 @@ from prompts import get as _prompt  # noqa: E402
 SCHEMA_AGENT_SYSTEM_PROMPT = _prompt("schema_agent")
 CODER_AGENT_SYSTEM_PROMPT = _prompt("coder_agent")
 PLANNER_AGENT_SYSTEM_PROMPT = _prompt("planner_agent")
-CRITIC_AGENT_SYSTEM_PROMPT = _prompt("critic_agent")
 STORYTELLER_AGENT_SYSTEM_PROMPT = _prompt("storyteller_agent")
 SUGGESTED_QUESTIONS_PROMPT = _prompt("suggested_questions")
 VISION_EXTRACTION_PROMPT = _prompt("vision_extraction")
