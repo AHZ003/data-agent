@@ -49,3 +49,11 @@ def test_docs_graph_matches_compiled_graph():
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_api_docs_match_the_app():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "export_api_docs.py"), "--check"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, "docs/api.md is stale; run scripts/export_api_docs.py"

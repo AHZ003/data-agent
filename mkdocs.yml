@@ -1,0 +1,48 @@
+site_name: DataAgent
+site_description: An evaluated, guarded text-to-SQL analytics agent
+repo_url: https://github.com/AHZ003/data-agent
+edit_uri: edit/main/docs/
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy, search.highlight]
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - How it works:
+      - Agent graph: graph.md
+      - Retrieval: retrieval.md
+      - Data at scale: scale.md
+  - Evaluation:
+      - Methodology & suites: evaluation.md
+      - Error taxonomy: error_taxonomy.md
+      - Models & cost frontier: models.md
+      - Results log: results.md
+      - Eval dashboard: eval-dashboard.md
+  - Production:
+      - HTTP API: api.md
+      - Performance: performance.md
+      - Observability: observability.md
+      - System card (safety): system_card.md
+      - Deploying: deploy.md
+  - Writing:
+      - "Postmortem: the infinite retry loop": postmortems/2026-04-13_eval_findings.md
+      - "Blog: the eval that caught the infinite loop": blog/2026-04-13-the-eval-that-caught-the-infinite-loop.md
+      - "Draft: most text-to-SQL improvements are noise": blog/draft-improvements-are-noise.md
