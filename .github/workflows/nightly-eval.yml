@@ -115,14 +115,15 @@ jobs:
             git worktree add --detach site
             (cd site && git checkout --orphan gh-pages && git rm -rf . >/dev/null 2>&1 || true)
           fi
+          # The docs site owns the gh-pages root; the dashboard lives in evals/.
           uv run python -m benchmarks.dashboard append \
             outputs/spider/summary.json outputs/bird/evidence_on/summary.json \
-            --history site/history.jsonl
-          uv run python -m benchmarks.dashboard build --history site/history.jsonl --out site/index.html
+            --history site/evals/history.jsonl
+          uv run python -m benchmarks.dashboard build --history site/evals/history.jsonl --out site/evals/index.html
           cd site
           git config user.name "dataagent-nightly-bot"
           git config user.email "nightly@dataagent.local"
-          git add history.jsonl index.html
+          git add evals/history.jsonl evals/index.html
           git commit -m "nightly eval $(date -u +%Y-%m-%dT%H:%M)" || echo "nothing to commit"
           git push origin gh-pages
 

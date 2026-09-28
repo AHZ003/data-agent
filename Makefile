@@ -1,4 +1,4 @@
-.PHONY: help install lock run api test eval eval-fast spider-setup spider-eval bird-setup bench bench-spider bench-bird bench-ablate bench-plan bench-oracle bench-golden redteam redteam-offline lint up down logs rebuild ps clean
+.PHONY: help install lock run api docs test eval eval-fast spider-setup spider-eval bird-setup bench bench-spider bench-bird bench-ablate bench-plan bench-oracle bench-golden redteam redteam-offline lint up down logs rebuild ps clean
 
 help:
 	@echo "DataAgent — common tasks"
@@ -7,6 +7,7 @@ help:
 	@echo "  make lock      Re-lock deps and regenerate requirements.txt"
 	@echo "  make run       Run Streamlit locally"
 	@echo "  make api       Run the FastAPI service locally (http://localhost:8000/docs)"
+	@echo "  make docs      Serve the documentation site locally"
 	@echo "  make test      Run pytest suite"
 	@echo "  make eval      Run benchmark eval (LLM judge on)"
 	@echo "  make eval-fast Run benchmark eval (no LLM judge)"
@@ -45,6 +46,9 @@ run:
 
 api:
 	$(RUN) uvicorn api.main:app --reload --port 8000
+
+docs:
+	uvx --with "mkdocs<2" --with mkdocs-material mkdocs serve
 
 test:
 	$(RUN) pytest tests/ -q

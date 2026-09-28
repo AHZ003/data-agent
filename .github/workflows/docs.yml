@@ -1,0 +1,29 @@
+name: Docs site
+
+# Builds the MkDocs site and publishes it to the gh-pages root. keep_files
+# preserves evals/ (the nightly eval dashboard, written by nightly-eval.yml).
+# One-time: Settings -> Pages -> Source: "Deploy from a branch", gh-pages / root.
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "mkdocs.yml", "benchmarks/README.md", "deploy/cloudrun.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build
+        run: uvx --with "mkdocs<2" --with mkdocs-material mkdocs build --strict --site-dir _site
+      - name: Publish
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          keep_files: true
