@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . .
 
-RUN mkdir -p /app/outputs /app/rag/chroma_db \
+RUN mkdir -p /app/outputs \
  && chown -R app:app /app
 
 USER app
