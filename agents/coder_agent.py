@@ -12,7 +12,7 @@ from config import (
     MAX_QUERY_ROWS,
     MAX_RETRY_ATTEMPTS,
 )
-from core import tracing
+from core import injection, pii, tracing
 from core.llm import current_api_key, with_rate_limit_backoff
 from core.database import Database
 from core.datasource import DataSource
@@ -55,7 +55,7 @@ def is_terminal_error(error: str) -> bool:
 
 # Bump when _build_sql_prompt's layout changes: it is part of the
 # benchmark cache key alongside the prompt file's SHA.
-PROMPT_BUILDER_VERSION = 3
+PROMPT_BUILDER_VERSION = 4
 
 
 def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
@@ -65,12 +65,17 @@ def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> st
         dialect=datasource.dialect.capitalize(),
         dialect_notes=prompt_registry.get(f"dialect_{datasource.dialect}"),
     )
+    # What leaves the machine: PII samples masked (or all samples dropped in
+    # local-only mode), instruction-like values neutralized, data delimited.
+    shown = pii.mask_datasource(injection.sanitize_datasource(datasource))
+    schema = injection.wrap("schema", shown.to_prompt())
+    notice = f"\n\n{injection.DATA_NOTICE}" if injection.enabled() else ""
     extra = context.render() if context is not None else ""
     extra = f"\n\n{extra}" if extra else ""
-    return f"""{system}
+    return f"""{system}{notice}
 
 DATABASE SCHEMA:
-{datasource.to_prompt()}{extra}
+{schema}{extra}
 
 USER QUESTION: {question}
 

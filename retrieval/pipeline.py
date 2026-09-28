@@ -100,9 +100,11 @@ class Retriever:
         ds, linker, values, layer = self._indexes(db)
         ctx = PromptContext()
         must_keep = set()
-        if values is not None:
+        from core import pii
+        if values is not None and not pii.local_only():
             matches = values.match(question)
-            ctx.value_hints = [m.hint() for m in matches]
+            from core.injection import looks_like_instruction
+            ctx.value_hints = [m.hint() for m in matches if not looks_like_instruction(m.value)]
             must_keep = {(m.table, m.column) for m in matches}
         if linker is not None:
             ds = linker.link(question, k=self.config.schema_k, must_keep=must_keep)

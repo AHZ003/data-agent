@@ -7,7 +7,7 @@ from google.genai import types as genai_types
 from typing import Iterator, List, Dict, Any, Optional
 
 from config import MODEL_NAME, STORYTELLER_AGENT_SYSTEM_PROMPT
-from core import tracing
+from core import injection, tracing
 from core.llm import current_api_key
 from models.report import AnalysisReport, ReportSection
 
@@ -20,10 +20,14 @@ def _build_narrative_prompt(
     validation_warnings: Optional[List[str]] = None,
     prediction_info: Optional[Dict[str, Any]] = None,
 ) -> str:
+    if injection.enabled():
+        # String-level defense for callers that pass raw text (summarize_result
+        # already neutralizes at the cell level).
+        result_summary = injection._RX.sub(injection.PLACEHOLDER, result_summary or "")
     context_parts = [
         f"Question: {question}",
         f"SQL Query: {sql_query}",
-        f"Results: {result_summary}",
+        "Results:\n" + injection.wrap("query_results", result_summary),
     ]
     if chart_description:
         context_parts.append(f"Chart: {chart_description}")
@@ -32,12 +36,33 @@ def _build_narrative_prompt(
     if prediction_info:
         context_parts.append(f"Prediction: {json.dumps(prediction_info, default=str)}")
 
+    notice = f"\n{injection.DATA_NOTICE}\n" if injection.enabled() else ""
     return f"""{STORYTELLER_AGENT_SYSTEM_PROMPT}
-
+{notice}
 ANALYSIS CONTEXT:
 {chr(10).join(context_parts)}
 
 Write the narrative now. Lead with the key finding, include specific numbers, and end with an actionable takeaway."""
+
+
+def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
+    """The result table as the Storyteller may see it.
+
+    PII columns are masked, instruction-like cells neutralized, and in
+    local-only mode only the shape and numeric summaries are shared.
+    """
+    from core import pii
+
+    if df is None:
+        return ""
+    if pii.local_only():
+        num = df.select_dtypes("number")
+        desc = num.describe().round(4).to_string() if not num.empty else "(no numeric columns)"
+        return f"{len(df)} rows; columns: {', '.join(map(str, df.columns))}\nNumeric summary:\n{desc}"
+    safe = injection.sanitize_frame(df.head(max_rows))
+    if pii_report is not None:
+        safe = pii.mask_frame(safe, pii_report)
+    return safe.to_string()
 
 
 def generate_narrative(

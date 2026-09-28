@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field
 
 from agents import orchestrator, storyteller_agent
 from api.auth import RateLimiter, require_key
-from core import resources, tracing
+from core import audit, faithfulness, pii, resources, tracing
 from core.demo import SAMPLE_QUESTIONS, load_sample_workspace
 from core.llm import api_key_override
 
@@ -172,22 +172,32 @@ def _run_stream(run_id: str, graph_input, gemini_key: Optional[str]) -> Iterator
                         yield from _events_for(node, update)
 
             final = S.graph.get_state(config).values
+            engine, _ = resources.get(run["datasource_id"])
             # Stream the narrative token by token (the graph skipped it).
             parts = []
             for token in storyteller_agent.stream_narrative(
                 question=final["question"], sql_query=final.get("sql_query") or "",
-                result_summary=final["result_df"].head(20).to_string() if final.get("result_df") is not None else "",
+                result_summary=storyteller_agent.summarize_result(
+                    final.get("result_df"), pii.detect(engine.datasource())),
                 chart_description=(final.get("chart_config") or {}).get("chart_type", ""),
                 validation_warnings=(final.get("validation") or {}).get("warnings", []),
                 prediction_info=final.get("prediction"),
             ):
                 parts.append(token)
                 yield sse("narrative_token", {"text": token})
+            narrative = "".join(parts)
+            warning = faithfulness.check(narrative, final.get("result_df"), final["question"])
+            if warning:
+                yield sse("faithfulness", {"warning": warning})
             run.update(status="done", result={
                 "question": final.get("display_question"), "sql": final.get("sql_query"),
                 "error": final.get("error"), "result": _preview(final.get("result_df")),
-                "validation": final.get("validation"), "narrative": "".join(parts),
+                "validation": final.get("validation"), "narrative": narrative,
+                "faithfulness_warning": warning,
             })
+            audit.record(run_id=run_id, api_key=run["key"], question=run["question"],
+                         sql=final.get("sql_query"), engine=engine,
+                         status="error" if final.get("error") else "ok")
             yield sse("done", {"run_id": run_id, "conversation_id": run["conversation_id"],
                                "error": final.get("error")})
             tracing.end_run(status="ok")
@@ -336,6 +346,12 @@ def edit_sql(run_id: str, edit: SQLEdit, key_name: str = Depends(require_key)):
     if err:
         raise HTTPException(400, err)
     return {"result": _preview(df)}
+
+
+@app.get("/v1/audit")
+def get_audit(limit: int = 100, key_name: str = Depends(require_key)):
+    """Audit trail of executed runs. Callers see only their own runs."""
+    return audit.recent(limit=min(limit, 1000), api_key=key_name)
 
 
 @app.get("/v1/metrics")

@@ -27,6 +27,7 @@ def _plan(q, schema, clarify=None):
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATAAGENT_CHECKPOINT_PATH", str(tmp_path / "ckpt.sqlite"))
     monkeypatch.setenv("DATAAGENT_TRACE_PATH", str(tmp_path / "trace.jsonl"))
+    monkeypatch.setenv("DATAAGENT_AUDIT_PATH", str(tmp_path / "audit.sqlite"))
     monkeypatch.delenv("DATAAGENT_API_KEYS", raising=False)
     from api import main
     monkeypatch.setattr(main, "EDITS_LOG", tmp_path / "edits.jsonl")
@@ -122,3 +123,14 @@ def test_token_bucket_refills():
     assert rl.allow("k") and rl.allow("k") and not rl.allow("k")
     t[0] += 1.0
     assert rl.allow("k") and not rl.allow("k")
+
+
+def test_audit_records_runs_and_pii_columns(client, stub_llm):
+    with patch.object(coder_agent, "_generate_sql",
+                      return_value='SELECT c."Email", SUM(i."Total") FROM "Customer" c JOIN "Invoice" i '
+                                   'ON c."CustomerId" = i."CustomerId" GROUP BY 1'):
+        _events(client.post("/v1/analyze", json={"question": "spend per customer email"}))
+    [row] = client.get("/v1/audit").json()
+    assert row["question"] == "spend per customer email" and row["status"] == "ok"
+    assert row["pii_columns_touched"] == ["customer.email"]
+    assert row["engine"] == "Database"

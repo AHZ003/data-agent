@@ -25,7 +25,7 @@ from agents import (
     storyteller_agent,
 )
 from core.database import Database
-from core import resources, tracing
+from core import faithfulness, pii, resources, tracing
 from core.semantic_cache import default_cache, schema_version
 from config import MODEL_NAME
 
@@ -67,6 +67,14 @@ def _resources(state) -> tuple:
     if state.get("db") is not None:
         return state["db"], state.get("df")
     return resources.get(state["datasource_id"])
+
+
+def _pii_report(state):
+    try:
+        db, _ = _resources(state)
+        return pii.detect(db.datasource())
+    except Exception:
+        return None
 
 
 def _sample_primary_table(db, n: int = 50_000) -> pd.DataFrame:
@@ -345,9 +353,7 @@ def storyteller_node(state: AgentState) -> AgentState:
 
     start = time.time()
     result_df = state.get("result_df")
-    result_summary = ""
-    if result_df is not None:
-        result_summary = result_df.head(20).to_string()
+    result_summary = storyteller_agent.summarize_result(result_df, _pii_report(state))
 
     validation = state.get("validation", {})
     warnings = validation.get("warnings", [])
@@ -372,6 +378,10 @@ def storyteller_node(state: AgentState) -> AgentState:
         duration_seconds=round(duration, 2),
     )
     state["narrative"] = narrative
+    warning = faithfulness.check(narrative, result_df, state["question"])
+    if warning:
+        state["validation"] = {**(state.get("validation") or {}),
+                               "warnings": (state.get("validation") or {}).get("warnings", []) + [warning]}
     state["agent_log"].append(log_entry.model_dump())
     return state
 
