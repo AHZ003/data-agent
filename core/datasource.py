@@ -116,9 +116,13 @@ class DataSource:
         blocks = []
         for t in self.tables:
             size = f" ({t.row_count:,} rows)" if t.row_count is not None else ""
-            lines = [f'Table "{t.name}"{size}']
+            header = f'Table "{t.name}"{size}'
+            if len(t.primary_key) > 1:
+                header += " PRIMARY KEY (" + ", ".join(f'"{c}"' for c in t.primary_key) + ")"
+            lines = [header]
             fks = {fk.column.lower(): fk for fk in t.foreign_keys}
-            pk = {c.lower() for c in t.primary_key}
+            # A composite key is shown once on the table line, not per column.
+            pk = {c.lower() for c in t.primary_key} if len(t.primary_key) == 1 else set()
             for c in t.columns:
                 line = f'  "{c.name}" {c.type or "ANY"}'
                 if c.name.lower() in pk:
