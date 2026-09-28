@@ -311,7 +311,9 @@ def execute_analysis(
                 columns=list(corr_df.columns),
             )
 
-    return generate_and_execute(question, db)
+    from retrieval.pipeline import default_retriever
+
+    return generate_and_execute(question, db, retriever=default_retriever())
 
 
 def generate_and_execute(

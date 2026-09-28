@@ -69,6 +69,33 @@ def _embedder(name: str):
     return default_embedder() if name == "auto" else GeminiEmbedder()
 
 
+def parse_flags(spec: str) -> dict:
+    """'values,schema_k=30,memory_k=3,semantic' -> {'values': True, 'schema_k': 30, ...}"""
+    out: dict = {}
+    for part in filter(None, (p.strip() for p in spec.split(","))):
+        key, _, val = part.partition("=")
+        out[key] = (int(val) if val.isdigit() else val) if val else True
+    return out
+
+
+_default: Optional["Retriever"] = None
+_default_spec: Optional[str] = None
+
+
+def default_retriever() -> Optional["Retriever"]:
+    """Retriever for the app/API from DATAAGENT_RETRIEVAL (unset = no retrieval).
+
+    e.g. DATAAGENT_RETRIEVAL="values,semantic,memory_k=3,embedder=auto"
+    """
+    import os
+    global _default, _default_spec
+    spec = os.getenv("DATAAGENT_RETRIEVAL", "")
+    if spec != _default_spec:
+        cfg = RetrievalConfig.from_flags(parse_flags(spec))
+        _default, _default_spec = (Retriever(cfg) if cfg else None), spec
+    return _default
+
+
 class Retriever:
     def __init__(self, config: RetrievalConfig, memory=None):
         self.config = config
@@ -77,8 +104,15 @@ class Retriever:
         self._per_db: dict[str, tuple] = {}
         self.memory = memory
         if config.memory_k and memory is None:
-            from retrieval.memory import QueryMemory
+            from retrieval.memory import LeakageError, QueryMemory
             self.memory = QueryMemory.from_spider_train(ROOT / "benchmarks" / "spider", self._embedder)
+            # Answers users confirmed with a thumbs-up (feedback/), same leakage guard.
+            import feedback
+            for item in feedback.user_memory_items():
+                try:
+                    self.memory.add(item)
+                except LeakageError:
+                    pass
 
     def _indexes(self, db):
         with self._lock:

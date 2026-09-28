@@ -89,6 +89,7 @@ def new_run(question: str, dataset: Optional[str] = None) -> str:
     rid = uuid.uuid4().hex[:16]
     _ctx.run_id = rid
     _ctx.parent_id = None
+    _otel_start_run(rid, question, dataset)
     emit_event(
         kind="run_start",
         agent_name="orchestrator",
@@ -105,6 +106,33 @@ def end_run(status: str = "ok", error: Optional[str] = None) -> None:
     )
     _ctx.run_id = None
     _ctx.parent_id = None
+    _otel_end_run(status, error)
+
+
+def _otel_start_run(rid: str, question: str, dataset: Optional[str]) -> None:
+    from core import otel
+    t = otel.tracer()
+    if t is None:
+        return
+    from opentelemetry import context, trace
+    root = t.start_span("dataagent.run", attributes={"dataagent.run_id": rid, "dataagent.question": question[:500],
+                                                     "dataagent.dataset": dataset or ""})
+    _ctx.otel_run = (root, context.attach(trace.set_span_in_context(root)))
+
+
+def _otel_end_run(status: str, error: Optional[str]) -> None:
+    run = getattr(_ctx, "otel_run", None)
+    if run is None:
+        return
+    from opentelemetry import context
+    from opentelemetry.trace import Status, StatusCode
+    root, token = run
+    root.set_attribute("dataagent.status", status)
+    if error:
+        root.set_status(Status(StatusCode.ERROR, error[:500]))
+    root.end()
+    context.detach(token)
+    _ctx.otel_run = None
 
 
 def current_run_id() -> str:
@@ -177,6 +205,9 @@ def span(
     handle = _Handle()
     stack = _span_stack()
     stack.append(handle)
+    from core import otel
+    otel_cm = otel.tracer().start_as_current_span(agent_name) if otel.tracer() is not None else None
+    otel_span = otel_cm.__enter__() if otel_cm is not None else None
     try:
         yield handle
     except Exception as e:
@@ -203,6 +234,12 @@ def span(
         _write(asdict(span_obj))
         _ctx.parent_id = parent
         stack.pop()
+        if otel_span is not None:
+            otel_span.set_attributes(otel.attrs(model, tokens_in, tokens_out, span_obj.cost_usd, meta))
+            if error:
+                from opentelemetry.trace import Status, StatusCode
+                otel_span.set_status(Status(StatusCode.ERROR, error[:500]))
+            otel_cm.__exit__(None, None, None)
 
 
 # ── LLM usage accounting ─────────────────────────────────────────────────

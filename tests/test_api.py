@@ -28,6 +28,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATAAGENT_CHECKPOINT_PATH", str(tmp_path / "ckpt.sqlite"))
     monkeypatch.setenv("DATAAGENT_TRACE_PATH", str(tmp_path / "trace.jsonl"))
     monkeypatch.setenv("DATAAGENT_AUDIT_PATH", str(tmp_path / "audit.sqlite"))
+    monkeypatch.setenv("DATAAGENT_FEEDBACK_DIR", str(tmp_path / "feedback"))
+    monkeypatch.setenv("DATAAGENT_ONLINE_EVAL_PATH", str(tmp_path / "online.jsonl"))
+    monkeypatch.setenv("DATAAGENT_ONLINE_EVAL_RATE", "1.0")
     monkeypatch.delenv("DATAAGENT_API_KEYS", raising=False)
     from api import main
     monkeypatch.setattr(main, "EDITS_LOG", tmp_path / "edits.jsonl")
@@ -134,3 +137,25 @@ def test_audit_records_runs_and_pii_columns(client, stub_llm):
     assert row["question"] == "spend per customer email" and row["status"] == "ok"
     assert row["pii_columns_touched"] == ["customer.email"]
     assert row["engine"] == "Database"
+
+
+def test_feedback_loop_and_online_eval(client, stub_llm, tmp_path, monkeypatch):
+    import feedback
+    from core import online_eval
+    monkeypatch.setattr(feedback, "GOLDEN_USER", tmp_path / "golden_user.yaml")
+    up = _events(client.post("/v1/analyze", json={"question": "What is total revenue?"}))[-1][1]["run_id"]
+    down = _events(client.post("/v1/analyze", json={"question": "revenue by country"}))[-1][1]["run_id"]
+    assert client.post(f"/v1/runs/{up}/feedback", json={"rating": "up"}).status_code == 200
+    assert client.post(f"/v1/runs/{down}/feedback", json={"rating": "down", "comment": "wrong"}).status_code == 200
+    assert client.post(f"/v1/runs/{up}/feedback", json={"rating": "meh"}).status_code == 422
+
+    assert [m.id for m in feedback.user_memory_items()] == [f"user-{up}"]
+    assert [r["run_id"] for r in feedback.review_queue()] == [down]
+    case = feedback.promote(down, 'SELECT "BillingCountry", SUM("Total") FROM "Invoice" GROUP BY 1',
+                            path=feedback.GOLDEN_USER)
+    assert case["id"] == "usr_001" and feedback.review_queue() == []
+    assert client.get("/v1/metrics").json()["feedback"]["golden_from_feedback"] == 1
+
+    scored = online_eval.load()
+    assert len(scored) == 2 and all(r["executed"] for r in scored)
+    assert client.get("/v1/alerts").json()["status"] == "insufficient data"
