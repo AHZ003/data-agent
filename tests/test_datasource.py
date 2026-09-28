@@ -118,3 +118,13 @@ def test_coder_prompt_renders_every_table(two_table_db):
     assert 'Table "orders"' in prompt
     assert "Sqlite" in prompt
     assert "USER QUESTION: total by region" in prompt
+
+
+def test_composite_primary_key_rendered_on_table_line(tmp_path):
+    path = tmp_path / "c.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE pt (a INTEGER, b INTEGER, PRIMARY KEY (a, b))")
+    conn.close()
+    text = DataSource.from_sqlite(str(path)).to_prompt()
+    assert 'Table "pt" (0 rows) PRIMARY KEY ("a", "b")' in text
+    assert '"a" INTEGER PRIMARY KEY' not in text
