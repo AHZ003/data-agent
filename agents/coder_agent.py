@@ -50,9 +50,10 @@ def is_terminal_error(error: str) -> bool:
     return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL)) or "CostConfirmationRequired" in error
 
 
-# Bump when _build_sql_prompt's layout changes: it is part of the
-# benchmark cache key alongside the prompt file's SHA.
-PROMPT_BUILDER_VERSION = 4
+# Bump when anything that changes the coder's output changes (prompt layout,
+# generation settings): it is part of the benchmark cache key alongside the
+# prompt file's SHA. v5: output budget raised for thinking models.
+PROMPT_BUILDER_VERSION = 5
 
 
 def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
@@ -134,7 +135,7 @@ def _generate_sql(
     if error_context:
         prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR:\n{error_context}\nPlease fix the query."
     text = llm.generate(prompt, model=model or model_for("coder"), temperature=0.0,
-                        max_output_tokens=1024, retry_rate_limits=True)
+                        max_output_tokens=llm.OUTPUT_BUDGET, retry_rate_limits=True)
     return _extract_sql(text)
 
 

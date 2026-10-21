@@ -88,6 +88,26 @@ def api_key_override(key: Optional[str]) -> Iterator[None]:
 
 # ── Generation ──────────────────────────────────────────────────────────
 
+# Thinking models (Gemini 3.x) spend output tokens on reasoning before the
+# answer, and those count against max_output_tokens. A tight limit (the old
+# 1,024) truncated SQL mid-statement on ~3% of questions. Billing is per
+# token actually generated, so a generous ceiling costs nothing extra.
+OUTPUT_BUDGET = int(os.getenv("DATAAGENT_MAX_OUTPUT_TOKENS", "8192"))
+
+_log = __import__("logging").getLogger("dataagent.llm")
+
+
+def _warn_if_truncated(response, model: str) -> None:
+    """Truncated answers look like valid-but-wrong output; make them loud."""
+    try:
+        reason = response.candidates[0].finish_reason
+    except (AttributeError, IndexError, TypeError):
+        return
+    if str(getattr(reason, "name", reason)) == "MAX_TOKENS":
+        from core import tracing
+        _log.warning("LLM output truncated at max_output_tokens (model=%s)", model)
+        tracing.mark_truncated()
+
 def _is_rate_limit(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(p in msg for p in ("resource_exhausted", "429", "quota", "rate limit", "rate_limit"))
@@ -114,6 +134,7 @@ def generate(
     )
     response = with_rate_limit_backoff(call, _is_rate_limit) if retry_rate_limits else call()
     _record(response, model)
+    _warn_if_truncated(response, model)
     return response.text
 
 
@@ -139,6 +160,7 @@ def generate_stream(
             yield text
     # Streamed usage metadata is cumulative; the last chunk has the total.
     _record(last, model)
+    _warn_if_truncated(last, model)
 
 
 def _record(response, model: str) -> None:

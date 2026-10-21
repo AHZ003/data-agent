@@ -273,6 +273,7 @@ class Usage:
     tokens_in: int = 0
     tokens_out: int = 0
     cost_usd: float = 0.0
+    truncated: int = 0
 
 
 @contextmanager
@@ -292,6 +293,15 @@ def usage_scope():
         yield usage
     finally:
         stack.remove(usage)
+
+
+def mark_truncated() -> None:
+    """Flag the open span and scopes: an LLM answer hit the output limit."""
+    stack = _span_stack()
+    if stack:
+        stack[-1].add_metadata(truncated=True)
+    for usage in _scope_stack():
+        usage.truncated += 1
 
 
 def record_usage(response: Any, model: Optional[str] = None, usd: Optional[float] = None) -> None:

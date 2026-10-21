@@ -63,6 +63,7 @@ class ExampleResult:
     tokens_out: int = 0
     cost_usd: float = 0.0
     latency_s: float = 0.0
+    truncated: int = 0
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExampleResult":
@@ -251,7 +252,7 @@ def run_example(ex: Example, db_path: Path, cfg: RunConfig, rule: str) -> Exampl
         gold_sql=ex.gold_sql, pred_sql=code.sql_query or "", match=match,
         error=None if code.success else code.error, gold_error=gold_error,
         attempts=code.attempts, tokens_in=usage.tokens_in, tokens_out=usage.tokens_out,
-        cost_usd=usage.cost_usd, latency_s=round(latency, 3),
+        cost_usd=usage.cost_usd, latency_s=round(latency, 3), truncated=usage.truncated,
     )
 
 
@@ -368,6 +369,7 @@ def summarize(results: list[ExampleResult], cfg: RunConfig) -> dict:
         "by_difficulty": by_diff,
         "n_error": sum(1 for r in results if r.error),
         "n_gold_error": sum(1 for r in results if r.gold_error),
+        "n_truncated": sum(1 for r in results if r.truncated),
         "mean_attempts": sum(r.attempts for r in results) / n,
         "repaired": sum(1 for r in results if r.match and r.attempts > 1),
         "cost_usd_total": round(sum(r.cost_usd for r in results), 4),
@@ -387,7 +389,8 @@ def render_report(title: str, results: list[ExampleResult], summary: dict) -> st
         "",
         f"**Execution accuracy:** {summary['ex']:.1%} (95% CI {lo:.1%}–{hi:.1%}), n={summary['n']}",
         "",
-        f"- Errors (no executable SQL): {summary['n_error']} · gold SQL errors: {summary['n_gold_error']}",
+        f"- Errors (no executable SQL): {summary['n_error']} · gold SQL errors: {summary['n_gold_error']} · "
+        f"truncated LLM outputs: {summary.get('n_truncated', 0)}",
         f"- Fixed by self-repair: {summary['repaired']} · mean attempts: {summary['mean_attempts']:.2f}",
         f"- Cost: ${summary['cost_usd_total']:.4f} total, ${summary['cost_usd_mean']:.5f}/question",
         f"- Latency: p50 {summary['latency_s']['p50']:.1f}s, p95 {summary['latency_s']['p95']:.1f}s",

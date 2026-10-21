@@ -4,6 +4,22 @@ Every experiment gets a dated entry: what was run, the numbers, and what it
 means. This is the source for the README scoreboard and the write-ups. Newest
 first.
 
+## 2026-10-20 — Chinook golden SQL set, Gemini 3.8 Flash (first live run)
+
+`python -m benchmarks.golden_sql_eval --concurrency 4` (repair mode, n=105):
+**EX 97.1% (95% CI 93.3–100.0%)**, $0.00435/question ($0.46 total), p50 4.4 s,
+p95 8.9 s. Saved as the CI gate baseline (`benchmarks/baselines/golden_sql.json`).
+
+- The first run scored 95.2%: 3 SQL answers were cut off mid-statement because
+  Gemini 3.x thinking tokens count against `max_output_tokens` (983 of 1,024 spent
+  thinking on one question). Output budget raised to 8,192 (billing is per token
+  used) and truncation is now flagged per example; rerun had 0 truncations. With
+  n=105 the 95.2 → 97.1 change is not itself a significant result.
+- Remaining misses (3): two return the correct answer plus an extra column
+  (official Spider rule counts these wrong: output_shape), one uses integer
+  division (`/ 60000` instead of `/ 60000.0`) despite the dialect note.
+- Gemini 2.5 models return 404 for new API projects; default is now 3.8 Flash.
+
 ## 2026-09-28 — Eval power analysis
 
 `python -m benchmarks.power`: paired MDE at 80% power is 6.3–8.9 pts on n=200

@@ -76,7 +76,7 @@ def generate_narrative(
         chart_description, validation_warnings, prediction_info,
     )
     return llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
-                        max_output_tokens=512).strip()
+                        max_output_tokens=llm.OUTPUT_BUDGET).strip()
 
 
 def stream_narrative(
@@ -99,7 +99,7 @@ def stream_narrative(
     )
     try:
         yield from llm.generate_stream(prompt, model=model_for("storyteller"), temperature=0.3,
-                                       max_output_tokens=1024)
+                                       max_output_tokens=llm.OUTPUT_BUDGET)
     except Exception as e:
         yield f"\n\n_Narrative generation encountered an error: {e}_"
 
@@ -161,7 +161,7 @@ Return ONLY the JSON:"""
 
     try:
         text = llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
-                            max_output_tokens=2048).strip()
+                            max_output_tokens=llm.OUTPUT_BUDGET).strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
             if match:

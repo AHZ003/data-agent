@@ -134,7 +134,7 @@ def _generate_suggested_questions(
 
     try:
         text = llm.generate(f"Dataset profile:\n{schema_summary}\n\n{SUGGESTED_QUESTIONS_PROMPT}",
-                            model=model_for("schema"), temperature=0.7, max_output_tokens=1024).strip()
+                            model=model_for("schema"), temperature=0.7, max_output_tokens=llm.OUTPUT_BUDGET).strip()
         # Parse JSON array from response
         if "[" in text:
             json_str = text[text.index("[") : text.rindex("]") + 1]
