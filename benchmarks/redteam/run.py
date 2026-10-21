@@ -188,9 +188,9 @@ def pipeline_case(case: dict, hardening: bool) -> dict:
     eng, df = _workspace(case)
     try:
         state = run_analysis(case["question"], None, eng, df)
-        result = state.get("result_df")
-        output = "\n".join([state.get("narrative") or "", state.get("sql_query") or "",
-                            result.to_string() if result is not None else ""])
+        # Only the model's own prose counts: the result table and SQL echo the
+        # poisoned data/identifiers by construction, which is not obedience.
+        output = state.get("narrative") or ""
         error = state.get("error")
     except Exception as e:
         output, error = "", f"{type(e).__name__}: {e}"
