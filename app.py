@@ -35,6 +35,15 @@ import feedback
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_ROWS_INGEST = 500_000
 DEMO = DemoLimits.from_env()
+# The store has one workspace for everyone. On the public demo that would let
+# any visitor open another visitor's uploads ("Recent datasets"), so nothing
+# is persisted there.
+PERSIST = not DEMO.enabled
+_SAMPLES = {
+    "E-Commerce Transactions": "data/ecommerce_transactions.csv",
+    "Superstore Sales": "data/superstore_sales.csv",
+    "Employee Data": "data/employee_data.csv",
+}
 
 
 def md_safe(text: str) -> str:
@@ -116,7 +125,7 @@ def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
         db.load_dataframe(extra, name)
     schema = profile_dataframe(df, table_name)
     _set_workspace(db, df, schema, table_name)
-    if persist and st.session_state.workspace_id:
+    if persist and PERSIST and st.session_state.workspace_id:
         try:
             dsid = store.save_dataset(
                 workspace_id=st.session_state.workspace_id,
@@ -293,6 +302,11 @@ def _session_cost_summary() -> dict:
     }
 
 
+def _inline_table(df):
+    if df is not None and 0 < len(df) <= 50:
+        st.dataframe(df, width="stretch", hide_index=True)
+
+
 def _render_sql_editor(analysis: dict):
     """Show the SQL; let the user edit and re-run it through the same guard."""
     sql = analysis["sql_query"]
@@ -306,7 +320,7 @@ def _render_sql_editor(analysis: dict):
         if err:
             st.error(err)
         else:
-            st.dataframe(df, width="stretch", height=260)
+            st.dataframe(df, width="stretch", hide_index=True)
 
 
 def _render_feedback(analysis: dict):
@@ -336,9 +350,11 @@ def render_assistant_body(analysis: dict, should_stream: bool):
         else:
             st.markdown(md_safe(narrative_text))
 
-    # Chart
+    # Chart, or the result as a table when no chart fits (e.g. 1-3 rows)
     if analysis.get("chart") is not None:
         st.plotly_chart(analysis["chart"], width="stretch", config={"displayModeBar": False})
+    else:
+        _inline_table(analysis.get("result_df"))
 
     if analysis.get("prediction_chart") is not None:
         st.plotly_chart(analysis["prediction_chart"], width="stretch", config={"displayModeBar": False})
@@ -392,7 +408,7 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             tab_idx = 0
             if "Data" in tab_names:
                 with tabs[tab_idx]:
-                    st.dataframe(analysis["result_df"], width="stretch", height=300)
+                    st.dataframe(analysis["result_df"], width="stretch", hide_index=True)
                 tab_idx += 1
             if "Query" in tab_names:
                 with tabs[tab_idx]:
@@ -458,6 +474,32 @@ def _handle_file_upload(uploaded_files):
     return True
 
 
+def _restore_from_url(ds: str) -> bool:
+    """A reload or reconnect starts a fresh session; reopen the dataset the URL
+    names so the user lands back in their workspace (chat history is lost)."""
+    if ds == "chinook":
+        init_sample_workspace()
+        return True
+    for name, path in _SAMPLES.items():
+        if ds == name.lower().replace(" ", "_") and os.path.exists(path):
+            init_database(pd.read_csv(path), ds, original_filename=os.path.basename(path))
+            return True
+    if PERSIST:
+        match = next((d for d in store.list_datasets(st.session_state.workspace_id) if d.name == ds), None)
+        if match and rehydrate_dataset(match.id):
+            st.query_params["view"], st.query_params["ds"] = "chat", ds
+            return True
+    return False
+
+
+if st.session_state.schema is None and _QP_VIEW == "chat" and _QP_DATASET:
+    with st.spinner("Restoring your workspace..."):
+        restored = _restore_from_url(_QP_DATASET)
+    if restored:
+        st.toast("Workspace restored after a reload — earlier answers were cleared.")
+    else:
+        st.query_params.clear()
+
 # --- Navigation: handle browser back button ---
 if st.session_state.schema is not None and _QP_VIEW != "chat":
     clear_session()
@@ -509,12 +551,7 @@ if st.session_state.schema is None:
             init_sample_workspace()
         st.rerun()
     qs1, qs2, qs3 = st.columns(3, gap="medium")
-    _samples = {
-        "E-Commerce Transactions": "data/ecommerce_transactions.csv",
-        "Superstore Sales": "data/superstore_sales.csv",
-        "Employee Data": "data/employee_data.csv",
-    }
-    for col, (name, path) in zip([qs1, qs2, qs3], _samples.items()):
+    for col, (name, path) in zip([qs1, qs2, qs3], _SAMPLES.items()):
         if col.button(name, key=f"qs_{name}", width="stretch"):
             if os.path.exists(path):
                 with st.spinner("Loading & profiling..."):
@@ -568,7 +605,7 @@ if st.session_state.schema is None:
                         st.rerun()
 
     # --- Previously loaded datasets ---
-    _library = store.list_datasets(st.session_state.workspace_id)
+    _library = store.list_datasets(st.session_state.workspace_id) if PERSIST else []
     if _library:
         st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
         section_label("Recent datasets")
@@ -596,12 +633,14 @@ else:
     if nav_l.button("< Back", key="nav_back", width="stretch"):
         clear_session()
         st.rerun()
+    _n_tables = len(st.session_state.db.datasource().tables)
+    _title = (st.query_params.get("ds") or schema.table_name).replace("_", " ").title()
+    _sub = (f"{_n_tables} tables" if _n_tables > 1
+            else f"{schema.row_count:,} rows · {schema.column_count} cols")
     nav_c.markdown(
         f'<div style="text-align:center;padding-top:0.25rem;">'
-        f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">'
-        f'{schema.table_name.replace("_", " ").title()}</span>'
-        f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">'
-        f'{schema.row_count:,} rows · {schema.column_count} cols</span></div>',
+        f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">{_title}</span>'
+        f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">{_sub}</span></div>',
         unsafe_allow_html=True,
     )
     if nav_r.button("New chat", key="nav_new", width="stretch"):
@@ -614,14 +653,21 @@ else:
     with st.expander("Dataset overview", expanded=False):
         _tables = st.session_state.db.datasource().tables
         if len(_tables) > 1:
-            st.caption("Tables: " + " · ".join(f"**{t.name}** ({t.row_count:,})" for t in _tables)
-                       + " — questions can join across them.")
-        render_profile(schema)
-        st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), width="stretch")
+            st.caption("Questions can join across these tables.")
+            st.dataframe(
+                pd.DataFrame([{"table": t.name, "rows": t.row_count, "columns": len(t.columns),
+                               "links to": ", ".join(sorted({fk.ref_table for fk in t.foreign_keys}))}
+                              for t in _tables]),
+                width="stretch", hide_index=True,
+            )
+        else:
+            render_profile(schema)
+            st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), width="stretch")
 
     # --- Report export (above the chat so the fixed input bar can't cover it) ---
+    export_slot = st.container()
     if st.session_state.analyses:
-        col_a, col_b, _ = st.columns([1, 1, 2])
+        col_a, col_b, _ = export_slot.columns([1, 1, 2])
         report_clicked = col_a.button("Export PDF report", width="stretch")
         md_clicked = col_b.button("Export Markdown", width="stretch")
     else:
@@ -665,7 +711,7 @@ else:
     # --- Chat history ---
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
-            with st.chat_message("user"):
+            with st.chat_message("user", avatar=":material/person:"):
                 st.markdown(msg["content"])
         else:
             with st.chat_message("assistant"):
@@ -739,7 +785,10 @@ else:
             with st.chat_message("assistant"):
                 if not has_data or val_status == "rejected":
                     error_msg = result.get("error") or ""
-                    if "QuotaExhausted" in error_msg:
+                    if error_msg.startswith("OutOfScope"):
+                        narrative = ("I can't answer that from this data: "
+                                     + error_msg.split(":", 1)[1].strip())
+                    elif "QuotaExhausted" in error_msg:
                         narrative = "The AI service quota has been exceeded. Please try again later."
                     elif not has_data:
                         narrative = (
@@ -753,7 +802,7 @@ else:
                             "validation agent (confidence too low). The results "
                             "may be inaccurate — consider rephrasing the question."
                         )
-                    st.warning(narrative)
+                    (st.info if error_msg.startswith("OutOfScope") else st.warning)(narrative)
                 else:
                     result_summary = storyteller_agent.summarize_result(
                         result_df, pii.detect(st.session_state.db.datasource()))
@@ -791,6 +840,8 @@ else:
                 # Show chart inline on first render
                 if result.get("chart") is not None:
                     st.plotly_chart(result["chart"], width="stretch", config={"displayModeBar": False})
+                elif has_data and val_status != "rejected":
+                    _inline_table(result_df)
                 if result.get("prediction_chart") is not None:
                     st.plotly_chart(result["prediction_chart"], width="stretch", config={"displayModeBar": False})
 
@@ -807,7 +858,7 @@ else:
                 "run_id": result.get("run_id"),
             }
             analysis_id = None
-            if st.session_state.dataset_id:
+            if st.session_state.dataset_id and PERSIST:
                 try:
                     analysis_id = store.save_analysis(
                         workspace_id=st.session_state.workspace_id,
@@ -848,7 +899,7 @@ else:
 
     # --- Report export handlers ---
     if (report_clicked or md_clicked) and st.session_state.analyses:
-        with st.spinner("Assembling report..."):
+        with export_slot, st.spinner("Assembling report..."):
             try:
                 schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
                 session_data = {

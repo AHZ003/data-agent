@@ -241,3 +241,16 @@ def test_should_retry_skips_on_auth_error():
         "error": "ProviderAuthError: API key not valid",
     }
     assert orchestrator.should_retry(state) == "continue"
+
+
+def test_cannot_answer_is_terminal_and_not_retried(toy_schema, toy_db):
+    from agents.coder_agent import OUT_OF_SCOPE_SENTINEL, is_terminal_error
+    calls = []
+    def fake(*a, **k):
+        calls.append(1)
+        return "CANNOT_ANSWER: The data has no weather information."
+    with patch.object(coder_agent, "_generate_sql", side_effect=fake):
+        df, res = coder_agent.execute_analysis("What's the weather in Paris?", toy_schema, toy_db)
+    assert len(calls) == 1 and df is None
+    assert res.error == f"{OUT_OF_SCOPE_SENTINEL}: The data has no weather information."
+    assert is_terminal_error(res.error)

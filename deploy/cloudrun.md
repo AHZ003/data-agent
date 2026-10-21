@@ -48,9 +48,9 @@ gcloud secrets add-iam-policy-binding gemini-api-key \
 ```bash
 gcloud run deploy dataagent --source . --region $REGION \
   --allow-unauthenticated \
-  --max-instances 2 --min-instances 0 --memory 2Gi --cpu 1 --timeout 300 \
+  --max-instances 2 --min-instances 0 --memory 2Gi --cpu 1 --timeout 3600 --session-affinity \
   --set-secrets GOOGLE_API_KEY=gemini-api-key:latest \
-  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10
+  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10,STREAMLIT_SERVER_MAX_UPLOAD_SIZE=10
 ```
 
 The command prints the service URL. Open it and ask three sample questions.
@@ -138,6 +138,8 @@ image needs the Postgres extra (`uv sync --extra postgres`); add it to
 |---|---|
 | `min-instances 0` | Idle demo costs nothing; first request after idle takes a few seconds (cold start) |
 | `max-instances 2` | Hard ceiling on concurrent spend from a traffic spike |
+| `--timeout 3600 --session-affinity` | Streamlit keeps one websocket per browser session. Cloud Run applies the request timeout to it (at 300 s every session was cut after 5 minutes: vanished chat box, lost answers), and without affinity a reconnect can land on the other instance, which has no session |
+| No shared dataset library in demo mode | All visitors share one store workspace; showing "Recent datasets" would let anyone open other people's uploads |
 | Secret Manager | Key rotation without rebuilding; never in image layers or logs |
 | WIF instead of a JSON key | Nothing long-lived to leak; access is scoped to this repo |
 | Demo limits in the app | Cloud Run caps compute, not LLM spend; the per-session cap and BYO key do |

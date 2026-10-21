@@ -115,3 +115,25 @@ def test_long_titles_wrap():
     q = "What is the breakdown of total sales across each customer segment and product category over time?"
     fig = generate_chart(df, q)
     assert "<br>" in fig.layout.title.text
+
+
+# ── Second QA pass ───────────────────────────────────────────────────────
+
+def test_horizontal_bar_has_measure_on_x():
+    df = pd.DataFrame({"Genre": [f"g{i}" for i in range(10)], "sales": range(10, 20)})
+    config = get_chart_config(df, "sales by genre")
+    assert config.chart_type == ChartType.HORIZONTAL_BAR
+    fig = generate_chart(df, "sales by genre", config)
+    assert list(fig.data[0].x) == list(range(10, 20)) and fig.data[0].orientation == "h"
+
+
+def test_year_axis_is_categorical():
+    df = pd.DataFrame({"year": ["2009", "2010", "2011", "2012", "2013"], "rev": [449.5, 481.5, 469.6, 477.5, 450.6]})
+    fig = generate_chart(df, "revenue by year")
+    assert fig.layout.xaxis.type == "category"
+
+
+def test_kpi_number_has_thousands_separator():
+    df = pd.DataFrame({"n": [1519]})
+    fig = generate_chart(df, "How many tracks have never been purchased?")
+    assert fig.data[0].number.valueformat == ",.0f"
