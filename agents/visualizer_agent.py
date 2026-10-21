@@ -173,10 +173,12 @@ def generate_chart(
             label = str(df[config.x_column].iloc[0]) if config.x_column in df.columns else None
             heading = (f"<b>{label}</b><br><span style='font-size:0.8em'>{title}</span>"
                        if label else title)
+            v = float(value)
+            fmt = ",.0f" if v.is_integer() else ",.2f"   # "1,519", "138.60"
             fig = go.Figure(
-                go.Indicator(mode="number", value=float(value), title={"text": heading})
+                go.Indicator(mode="number", value=v, number={"valueformat": fmt}, title={"text": heading})
             )
-            fig.update_layout(template=template, height=300)
+            fig.update_layout(template=template, height=230, margin=dict(t=70, b=10))
             return fig
 
         if config.chart_type == ChartType.SMALL_MULTIPLES:
@@ -188,7 +190,9 @@ def generate_chart(
             for i, m in enumerate(measures, 1):
                 fig.add_trace(go.Bar(x=x, y=df[m], name=m, showlegend=False,
                                      marker_color=_PALETTE[(i - 1) % len(_PALETTE)]), row=i, col=1)
-            fig.update_layout(title=title, template=template, height=220 * len(measures) + 80)
+            n_title_lines = title.count("<br>") + 1
+            fig.update_layout(title=title, template=template, height=220 * len(measures) + 80,
+                              margin=dict(t=50 + 22 * n_title_lines))
             return fig
 
         if config.chart_type == ChartType.BAR:
@@ -200,18 +204,24 @@ def generate_chart(
             return fig
 
         if config.chart_type == ChartType.HORIZONTAL_BAR:
+            # The config already stores x = measure, y = category. Swapping them
+            # again here drew bars as thin lines (QA 2.3).
             fig = px.bar(
-                df, x=config.y_column, y=config.x_column, orientation="h",
+                df, x=config.x_column, y=config.y_column, orientation="h",
                 title=title, template=template,
             )
+            fig.update_yaxes(autorange="reversed", type="category")
+            fig.update_layout(height=max(320, 28 * len(df) + 120))
             return fig
 
         if config.chart_type == ChartType.LINE:
             fig = px.line(
                 df, x=config.x_column, y=config.y_column,
-                title=title, template=template,
+                title=title, template=template, markers=len(df) <= 30,
                 labels={config.x_column: config.x_label, config.y_column: config.y_label},
             )
+            if _is_year_like(df[config.x_column]):
+                fig.update_xaxes(type="category")  # 2009, 2010 — not "2,009.5"
             return fig
 
         if config.chart_type == ChartType.SCATTER:
@@ -258,6 +268,12 @@ def generate_chart(
 
 
 _PALETTE = ["#6C5CE7", "#00B894", "#FDCB6E", "#0984E3"]
+
+
+def _is_year_like(s: pd.Series) -> bool:
+    """Integer-valued years (or year strings) that plotly would treat as a continuous axis."""
+    v = pd.to_numeric(s, errors="coerce")
+    return bool(v.notna().all() and (v % 1 == 0).all() and v.between(1900, 2100).all())
 
 
 def _wrap(text: str, width: int = 70) -> str:

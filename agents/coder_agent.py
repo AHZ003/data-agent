@@ -41,6 +41,11 @@ def _is_auth_error(exc: Exception) -> bool:
     return any(p.lower() in msg for p in _AUTH_PATTERNS)
 
 
+# The model judged the question unanswerable from this data (off-topic, or a
+# request to modify data). Terminal: retrying would not change the answer.
+OUT_OF_SCOPE_SENTINEL = "OutOfScope"
+_CANNOT_ANSWER = re.compile(r"^\s*CANNOT_ANSWER\s*:?\s*(.*)", re.IGNORECASE | re.DOTALL)
+
 # An unexpected provider/infrastructure failure outside the SQL loop (e.g. an
 # embedding outage during retrieval): terminal for this attempt, and never
 # cached by the benchmarks so a rerun retries it.
@@ -53,13 +58,14 @@ def is_terminal_error(error: str) -> bool:
     A query that needs the user's cost confirmation (BigQuery) is terminal
     too: the caller must ask, not the LLM.
     """
-    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL, PROVIDER_SENTINEL)) or "CostConfirmationRequired" in error
+    return (error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL, PROVIDER_SENTINEL, OUT_OF_SCOPE_SENTINEL))
+            or "CostConfirmationRequired" in error)
 
 
 # Bump when anything that changes the coder's output changes (prompt layout,
 # generation settings): it is part of the benchmark cache key alongside the
-# prompt file's SHA. v5: output budget raised for thinking models.
-PROMPT_BUILDER_VERSION = 5
+# prompt file's SHA. v5: output budget raised for thinking models. v6: CANNOT_ANSWER.
+PROMPT_BUILDER_VERSION = 6
 
 
 def _build_sql_prompt(question: str, datasource: DataSource, context=None) -> str:
@@ -349,6 +355,11 @@ def generate_and_execute(
     for attempt in range(1, max_attempts + 1):
         try:
             sql = _generate_sql(question, datasource, error_context=last_error, model=model, context=context)
+            refusal = _CANNOT_ANSWER.match(sql or "")
+            if refusal:
+                reason = refusal.group(1).strip() or "This data can't answer that question."
+                return None, CodeResult(sql_query="", success=False, attempts=attempt,
+                                        error=f"{OUT_OF_SCOPE_SENTINEL}: {reason}")
             last_sql = sql
 
             unsupported = _check_unsupported_functions(sql) if db.dialect == "sqlite" else None

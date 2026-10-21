@@ -59,7 +59,11 @@ def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
     safe = injection.sanitize_frame(df.head(max_rows))
     if pii_report is not None:
         safe = pii.mask_frame(safe, pii_report)
-    return safe.to_string()
+    text = safe.to_string()
+    if len(df) > max_rows:
+        # The narrative once said "19 countries" for a 25-row result it only saw 20 of.
+        text += f"\n(showing the first {max_rows} of {len(df):,} rows; the full result has {len(df):,} rows)"
+    return text
 
 
 def generate_narrative(
