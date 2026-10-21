@@ -153,7 +153,8 @@ def generate(
     response = with_rate_limit_backoff(call, is_transient) if retry_rate_limits else call()
     _record(response, model)
     _warn_if_truncated(response, model)
-    return response.text
+    # Blocked or empty candidates come back as text=None; callers expect a str.
+    return response.text or ""
 
 
 def generate_stream(

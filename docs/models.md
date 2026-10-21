@@ -38,19 +38,24 @@ Any agent can use any model: `DATAAGENT_MODEL_<AGENT>=ollama/<model>` or
 - Frontier: `python -m benchmarks.pareto --benchmark spider` →
   `docs/pareto_spider.svg`.
 
-## Results
+## Results (2026-10-21)
 
-**Pending.** Needs, in order:
+Same 200 stratified Spider dev questions; repair mode; paired vs 3.8 Flash.
 
-1. A valid `GOOGLE_API_KEY`, then
-   `python -m benchmarks.ablate --only spider-flash-repair,spider-pro-repair`.
-2. `ollama pull qwen2.5-coder:7b`, then `--only spider-qwen7b-base`.
-3. The QLoRA run on a GPU (`training/qlora_unsloth.ipynb`), `ollama create
-   dataagent-sql`, then `--only spider-finetuned-1.5b`.
-4. `python -m routing.train --cheap spider-flash-repair --strong spider-pro-repair`,
-   then `--only spider-router`.
-5. `python -m benchmarks.pareto --benchmark spider`.
+| Config | EX | 95% CI | Δ vs Flash | McNemar p | $/question | p95 latency |
+|---|---|---|---|---|---|---|
+| Gemini 3.5 Flash-Lite | 82.0% | 76.5–87.0% | −4.0 | 0.13 | $0.00053 | 1.4 s |
+| Gemini 3.8 Flash | 86.0% | 81.0–90.5% | — | — | $0.00489 | 43.6 s |
+| Gemini 3.1 Pro (preview) | 88.0% | 83.5–92.5% | +2.0 | 0.42 | $0.01109 | 57.3 s |
 
-Expected shape, to be confirmed or refuted: the fine-tuned 1.5B model will not
-beat Pro; the interesting numbers are where it lands per dollar and whether the
-router recovers most of Pro's accuracy at a fraction of its cost.
+![Cost vs accuracy](pareto_spider.svg)
+
+- Neither difference is significant at n=200, but the cost and latency gaps are
+  large: Flash-Lite is 9× cheaper and ~30× faster at p95 for ~4 points.
+- **Router.** Trained on half the questions, evaluated on the other half
+  (n=100). A Flash-Lite → **Pro** router reached Pro's 84% only at 66% of Pro's
+  cost — and plain 3.8 Flash scored the same 84% on those questions for less, so
+  escalating to Pro is dominated. A Flash-Lite → **Flash** router matches Flash's
+  84% at 59% of Flash's cost (38% of questions escalated), or 83% at 48%. With
+  n=100 the CIs are ±7 pts; treat as promising, not settled.
+- Fine-tuned 1.5B model and local Qwen-7B: **pending** (GPU run / Ollama).

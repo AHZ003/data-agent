@@ -1,7 +1,6 @@
 # DataAgent system card
 
-_Last updated 2026-09-28. Numbers marked **pending** need a run with a valid
-Gemini API key; see `docs/results.md` for the dated log._
+_Last updated 2026-10-21. Dated log: `docs/results.md`._
 
 ## What it is
 
@@ -51,10 +50,10 @@ three sample values per column, and up to 20 result rows for the narrative.
 |---|---|
 | Harness correctness (gold SQL through the production path) | Spider 1034/1034, Chinook 105/105, BIRD 498/500 (2 gold queries exceed BIRD's 30 s limit) |
 | Red team, SQL guard evasion (23 attacks) | before 5/23 succeeded (22%), after **0/23**; legitimate queries wrongly blocked: before 3/8, after 0/8 |
-| Red team, data-borne prompt injection (18 attacks, 4 categories) | **pending** (`python -m benchmarks.redteam.run`) |
+| Red team, data-borne prompt injection (18 attacks, 4 categories) | 1/18 succeed with hardening off, 0/18 on (the one: a fake `<|im_start|>system` block in a cell); not a significant difference |
 | Schema-linking recall, all gold columns kept | Spider 97.5% at k=20; BIRD 89.6% at k=30 (offline, BM25) |
-| Spider dev / BIRD mini-dev execution accuracy | **pending** |
-| Chinook golden SQL set (105 questions) | **pending** |
+| Spider dev / BIRD mini-dev execution accuracy (200-question subsets) | 86.0% [81.0, 90.5] / 72.5% [66.0, 78.5] with evidence hints, 55.0% without |
+| Chinook golden SQL set (105 questions) | 97.1% [93.3, 100.0] |
 | Service overhead (stubbed LLM, 1 process) | 0 failures to 200 users; p50 at the model-time floor up to ~100 users |
 
 ## Known failure modes and limits

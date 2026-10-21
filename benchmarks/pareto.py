@@ -40,12 +40,18 @@ def frontier(points: list[dict]) -> list[dict]:
 
 def load_points(benchmark: str) -> list[dict]:
     summary = json.loads((ROOT / "outputs" / "ablations" / "summary.json").read_text())
-    pts = [{"name": r["name"], "ex": r["ex"], "ci": r["ci"], "cost_mean": r["cost_mean"], "kind": "config"}
+    def label(run_name: str) -> str:
+        model = summary.get("configs", {}).get(run_name, {}).get("model", run_name)
+        short = model.replace("gemini-", "").replace("-preview", "").replace("ollama/", "")
+        return " ".join(w if w[:1].isdigit() else w.capitalize() for w in short.replace("-", " ").split())
+
+    pts = [{"name": label(r["name"]), "ex": r["ex"], "ci": r["ci"], "cost_mean": r["cost_mean"], "kind": "config"}
            for r in summary["rows"] if r["benchmark"] == benchmark and r["cost_mean"] > 0]
     router = ROOT / "outputs" / "routing" / "frontier.json"
     if router.exists():
         c = json.loads(router.read_text())["chosen"]
-        pts.append({"name": f"router (t={c['threshold']:.2f}, {c['share_strong']:.0%} strong)",
+        d = json.loads(router.read_text())
+        pts.append({"name": f"Router ({c['share_strong']:.0%} escalated)", "n_test": d["n_test"],
                     "ex": c["ex"], "ci": c["ci"], "cost_mean": c["cost_mean"], "kind": "router"})
     return pts
 
@@ -55,7 +61,7 @@ def svg(points: list[dict], title: str, w: int = 720, h: int = 420) -> str:
     xs = [math.log10(p["cost_mean"]) for p in points]
     x0, x1 = math.floor(min(xs)), math.ceil(max(xs))
     x1 = x1 if x1 > x0 else x0 + 1
-    y0 = max(0.0, math.floor(min(p["ci"][0] for p in points) * 10) / 10)
+    y0 = max(0.0, math.floor((min(p["ci"][0] for p in points) - 0.03) * 10) / 10)  # room for labels
     y1 = min(1.0, math.ceil(max(p["ci"][1] for p in points) * 10) / 10)
     y1 = y1 if y1 > y0 else y0 + 0.1
     X = lambda c: left + (math.log10(c) - x0) / (x1 - x0) * (w - left - right)  # noqa: E731
@@ -82,13 +88,16 @@ def svg(points: list[dict], title: str, w: int = 720, h: int = 420) -> str:
         parts.append(f'<path d="{d}" fill="none" stroke="{INK_2}" stroke-width="1.5" stroke-dasharray="4 3"/>')
     for p in points:
         cx, cy = X(p["cost_mean"]), Y(p["ex"])
+        # Label centred under the point's own CI bar: bars end at different
+        # heights, so labels of neighbouring points don't run into each other.
+        ly = Y(p["ci"][0]) + 15
         color = C_ROUTER if p["kind"] == "router" else C_CONFIG
         fill = color if id(p) in on else "#fcfcfb"
         parts.append(
             f'<g><title>{e(p["name"])}: {p["ex"]:.1%} [{p["ci"][0]:.1%}–{p["ci"][1]:.1%}], ${p["cost_mean"]:.5f}/q</title>'
             f'<line x1="{cx:.1f}" x2="{cx:.1f}" y1="{Y(p["ci"][0]):.1f}" y2="{Y(p["ci"][1]):.1f}" stroke="{color}" stroke-width="2"/>'
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{fill}" stroke="{color}" stroke-width="2"/>'
-            f'<text x="{cx + 9:.1f}" y="{cy - 7:.1f}" font-size="11" fill="{INK}">{e(p["name"])}</text></g>')
+            f'<text x="{cx:.1f}" y="{ly:.1f}" font-size="11" text-anchor="middle" fill="{INK}">{e(p["name"])}</text></g>')
     parts.append("</svg>")
     return "\n".join(parts)
 
