@@ -12,8 +12,8 @@ Spider dev subset (`benchmarks/ablations.yaml`, section P7):
 
 | Config | Model | Notes |
 |---|---|---|
-| `spider-flash-repair` | Gemini 2.5 Flash | default |
-| `spider-pro-repair` | Gemini 2.5 Pro | strong model |
+| `spider-flash-repair` | Gemini 3.8 Flash | default |
+| `spider-pro-repair` | Gemini 3.1 Pro (preview) | strong model |
 | `spider-qwen7b-base` | Qwen2.5-Coder 7B via Ollama | open model, no fine-tuning |
 | `spider-finetuned-1.5b` | Qwen2.5-Coder 1.5B + QLoRA | `training/`, Spider train only |
 | `spider-router` | Flash, escalating to Pro | `routing/`, trained on held-out half |

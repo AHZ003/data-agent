@@ -279,7 +279,7 @@ def main():
                         help="Exit non-zero if overall score below this (CI gate)")
     parser.add_argument("--model", default=None,
                         help="Override the agent-crew model for this run "
-                             "(sets DATAAGENT_MODEL). e.g. gemini-2.5-pro")
+                             "(sets DATAAGENT_MODEL). e.g. gemini-3.1-pro-preview")
     parser.add_argument("--compare", default=None,
                         help="Comma-separated list of models — runs the harness "
                              "once per model (subprocess) and writes a comparison "

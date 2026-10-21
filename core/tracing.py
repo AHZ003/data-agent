@@ -33,6 +33,10 @@ from typing import Any, Optional
 # https://ai.google.dev/gemini-api/docs/pricing as of 2026-09-28. Thinking
 # tokens are billed as output. Update this table when Google changes it.
 MODEL_PRICING: dict[str, dict[str, float]] = {
+    # 3.6-3.8 Flash prices hold through 2026-12-31 and rise on 2027-01-01.
+    "gemini-3.8-flash":      {"in": 0.75, "out": 3.75},
+    "gemini-3.7-flash":      {"in": 0.75, "out": 3.75},
+    "gemini-3.6-flash":      {"in": 0.75, "out": 3.75},
     "gemini-2.5-flash-lite": {"in": 0.10, "out": 0.40},
     "gemini-2.5-flash":      {"in": 0.30, "out": 2.50},
     "gemini-2.5-pro":        {"in": 1.25, "out": 10.00},
@@ -40,8 +44,9 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "gemini-3.5-flash-lite": {"in": 0.30, "out": 2.50},
     "gemini-3.5-flash":      {"in": 1.50, "out": 9.00},
     "gemini-3.1-pro-preview": {"in": 2.00, "out": 12.00},
-    # Unknown models are priced like 2.5 Flash rather than as free.
-    "default":               {"in": 0.30, "out": 2.50},
+    # 2.5 models are closed to new projects; kept for older traces.
+    # Unknown models are priced like the default model, never as free.
+    "default":               {"in": 0.75, "out": 3.75},
 }
 
 
@@ -183,7 +188,7 @@ def span(
     """Context manager wrapping an agent step. Auto-emits a Span on exit.
 
     Usage:
-        with tracing.span("coder", model="gemini-2.5-flash") as s:
+        with tracing.span("coder", model="gemini-3.8-flash") as s:
             result = do_work()
             s.set_tokens(in_=123, out_=456)
             s.add_metadata(sql=result.sql[:200])

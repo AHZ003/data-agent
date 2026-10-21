@@ -9,7 +9,7 @@ A text-to-SQL analytics agent. A user asks a question in plain English about a
 workspace (uploaded CSV/Parquet files, a SQLite database, or BigQuery tables);
 a LangGraph pipeline plans, writes and runs one read-only SQL query, checks the
 result statistically, draws a chart, and writes a short narrative.
-Default model: Gemini 2.5 Flash.
+Default model: Gemini 3.8 Flash (Gemini 2.5 is closed to new API projects).
 
 ## Intended use
 
