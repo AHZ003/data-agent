@@ -33,12 +33,14 @@ def _classify_chart_type(df: pd.DataFrame, question: str) -> ChartConfig:
         date_cols = date_cols + detected_dates
         cat_cols = [c for c in cat_cols if c not in detected_dates]
 
-    # Single value -> KPI card
+    # Single value -> KPI card. If the row also names what won ("Which region
+    # has the highest sales?" -> Central), keep that label on the card.
     if len(df) == 1 and len(num_cols) == 1:
         return ChartConfig(
             chart_type=ChartType.KPI_CARD,
             title=question,
             y_column=num_cols[0],
+            x_column=(cat_cols + date_cols)[0] if (cat_cols or date_cols) else None,
         )
 
     # Trivial results (very few rows, no explicit chart request) -> table
@@ -88,13 +90,28 @@ def _classify_chart_type(df: pd.DataFrame, question: str) -> ChartConfig:
     # Categorical + numeric
     if cat_cols and num_cols:
         n_categories = df[cat_cols[0]].nunique()
+        second_dim = cat_cols[1] if len(cat_cols) > 1 else None
         if len(num_cols) > 1:
+            # Measures on very different scales (sales ~200k, avg profit ~50)
+            # can't share one y-axis: one panel per measure instead.
+            mags = df[num_cols].abs().max().replace(0, float("nan")).dropna()
+            spread = (mags.max() / mags.min()) if len(mags) > 1 else 1.0
+            return ChartConfig(
+                chart_type=ChartType.SMALL_MULTIPLES if spread > 10 else ChartType.GROUPED_BAR,
+                title=question,
+                x_column=cat_cols[0],
+                y_column=num_cols[0],
+                color_column=second_dim,
+                x_label=cat_cols[0],
+                y_label=num_cols[0],
+            )
+        if second_dim:
             return ChartConfig(
                 chart_type=ChartType.GROUPED_BAR,
                 title=question,
                 x_column=cat_cols[0],
                 y_column=num_cols[0],
-                color_column=cat_cols[0] if len(cat_cols) > 1 else None,
+                color_column=second_dim,
                 x_label=cat_cols[0],
                 y_label=num_cols[0],
             )
@@ -148,20 +165,36 @@ def generate_chart(
         config = _classify_chart_type(df, question)
 
     template = config.template
+    title = _wrap(config.title)
 
     try:
         if config.chart_type == ChartType.KPI_CARD:
             value = df[config.y_column].iloc[0] if config.y_column else df.iloc[0, 0]
+            label = str(df[config.x_column].iloc[0]) if config.x_column in df.columns else None
+            heading = (f"<b>{label}</b><br><span style='font-size:0.8em'>{title}</span>"
+                       if label else title)
             fig = go.Figure(
-                go.Indicator(mode="number", value=float(value), title={"text": config.title})
+                go.Indicator(mode="number", value=float(value), title={"text": heading})
             )
             fig.update_layout(template=template, height=300)
+            return fig
+
+        if config.chart_type == ChartType.SMALL_MULTIPLES:
+            from plotly.subplots import make_subplots
+            measures = df.select_dtypes(include="number").columns.tolist()[:4]
+            x = _x_labels(df, config)
+            fig = make_subplots(rows=len(measures), cols=1, shared_xaxes=True,
+                                vertical_spacing=0.08, subplot_titles=measures)
+            for i, m in enumerate(measures, 1):
+                fig.add_trace(go.Bar(x=x, y=df[m], name=m, showlegend=False,
+                                     marker_color=_PALETTE[(i - 1) % len(_PALETTE)]), row=i, col=1)
+            fig.update_layout(title=title, template=template, height=220 * len(measures) + 80)
             return fig
 
         if config.chart_type == ChartType.BAR:
             fig = px.bar(
                 df, x=config.x_column, y=config.y_column,
-                title=config.title, template=template,
+                title=title, template=template,
                 labels={config.x_column: config.x_label, config.y_column: config.y_label},
             )
             return fig
@@ -169,14 +202,14 @@ def generate_chart(
         if config.chart_type == ChartType.HORIZONTAL_BAR:
             fig = px.bar(
                 df, x=config.y_column, y=config.x_column, orientation="h",
-                title=config.title, template=template,
+                title=title, template=template,
             )
             return fig
 
         if config.chart_type == ChartType.LINE:
             fig = px.line(
                 df, x=config.x_column, y=config.y_column,
-                title=config.title, template=template,
+                title=title, template=template,
                 labels={config.x_column: config.x_label, config.y_column: config.y_label},
             )
             return fig
@@ -184,7 +217,7 @@ def generate_chart(
         if config.chart_type == ChartType.SCATTER:
             fig = px.scatter(
                 df, x=config.x_column, y=config.y_column,
-                title=config.title, template=template,
+                title=title, template=template,
                 labels={config.x_column: config.x_label, config.y_column: config.y_label},
             )
             return fig
@@ -192,14 +225,14 @@ def generate_chart(
         if config.chart_type == ChartType.PIE:
             fig = px.pie(
                 df, names=config.x_column, values=config.y_column,
-                title=config.title, template=template,
+                title=title, template=template,
             )
             return fig
 
         if config.chart_type == ChartType.HISTOGRAM:
             fig = px.histogram(
                 df, x=config.x_column,
-                title=config.title, template=template,
+                title=title, template=template,
                 labels={config.x_column: config.x_label},
             )
             return fig
@@ -207,22 +240,37 @@ def generate_chart(
         if config.chart_type == ChartType.GROUPED_BAR:
             num_cols = df.select_dtypes(include="number").columns.tolist()
             if len(num_cols) >= 2:
+                x = _x_labels(df, config)
                 fig = go.Figure()
                 for col in num_cols[:4]:
-                    fig.add_trace(go.Bar(name=col, x=df[config.x_column], y=df[col]))
-                fig.update_layout(
-                    barmode="group", title=config.title, template=template,
-                )
+                    fig.add_trace(go.Bar(name=col, x=x, y=df[col]))
+                fig.update_layout(barmode="group", title=title, template=template)
                 return fig
             return px.bar(
-                df, x=config.x_column, y=config.y_column,
-                title=config.title, template=template,
+                df, x=config.x_column, y=config.y_column, color=config.color_column,
+                barmode="group", title=title, template=template,
             )
     except Exception:
         return None
 
     # TABLE or unknown -> return None (caller displays as dataframe)
     return None
+
+
+_PALETTE = ["#6C5CE7", "#00B894", "#FDCB6E", "#0984E3"]
+
+
+def _wrap(text: str, width: int = 70) -> str:
+    """Long questions as chart titles: wrap instead of being cut off."""
+    import textwrap
+    return "<br>".join(textwrap.wrap(text or "", width)) or text
+
+
+def _x_labels(df: pd.DataFrame, config: ChartConfig):
+    """One x label per row; with a second dimension, 'Segment · Category'."""
+    if config.color_column and config.color_column in df.columns:
+        return df[config.x_column].astype(str) + " · " + df[config.color_column].astype(str)
+    return df[config.x_column]
 
 
 def get_chart_config(df: pd.DataFrame, question: str) -> ChartConfig:

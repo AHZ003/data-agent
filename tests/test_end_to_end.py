@@ -82,3 +82,36 @@ if __name__ == "__main__":
     test_clustering()
     print("✓ test_clustering passed")
     print("\nAll end-to-end tests passed!")
+
+
+# ── Regressions from the first live deploy ───────────────────────────────
+
+def test_kpi_keeps_the_winning_label():
+    df = pd.DataFrame({"Region": ["Central"], "total_sales": [168556.36]})
+    config = get_chart_config(df, "Which region has the highest total sales?")
+    assert config.chart_type == ChartType.KPI_CARD and config.x_column == "Region"
+    fig = generate_chart(df, "Which region has the highest total sales?", config)
+    assert "Central" in fig.data[0].title.text
+
+
+def test_measures_on_different_scales_get_separate_panels():
+    df = pd.DataFrame({
+        "Segment": ["Consumer"] * 3 + ["Corporate"] * 3,
+        "Category": ["Furniture", "Office", "Tech"] * 2,
+        "total_sales": [77623.0, 60000.0, 73577.0, 70000.0, 65000.0, 72000.0],
+        "avg_profit": [38.9, 20.1, 59.5, 58.3, 25.0, 56.0],
+        "total_quantity": [1500, 4000, 1700, 1600, 3900, 1713],
+    })
+    q = "Breakdown of total sales, average profit and quantity by segment and category"
+    config = get_chart_config(df, q)
+    assert config.chart_type == ChartType.SMALL_MULTIPLES
+    fig = generate_chart(df, q, config)
+    assert len(fig.data) == 3                       # one panel per measure
+    assert list(fig.data[0].x)[0] == "Consumer · Furniture"  # both dimensions on x
+
+
+def test_long_titles_wrap():
+    df = pd.DataFrame({"Category": list("ABCDE"), "Revenue": [1, 2, 3, 4, 5]})
+    q = "What is the breakdown of total sales across each customer segment and product category over time?"
+    fig = generate_chart(df, q)
+    assert "<br>" in fig.layout.title.text

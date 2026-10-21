@@ -13,6 +13,7 @@ class ChartType(str, Enum):
     PIE = "pie"
     HISTOGRAM = "histogram"
     GROUPED_BAR = "grouped_bar"
+    SMALL_MULTIPLES = "small_multiples"  # several measures on very different scales
     KPI_CARD = "kpi_card"
     TABLE = "table"
     FORECAST = "forecast"
