@@ -17,7 +17,6 @@ import pandas as pd
 from config import MODEL_NAME
 from core import tracing
 from core import llm
-from core.llm import current_api_key
 
 
 @dataclass
@@ -248,7 +247,7 @@ def score_narrative_faithfulness(
         from google import genai
         from google.genai import types as genai_types
 
-        client = genai.Client(api_key=current_api_key())
+        client = llm.client()
         prompt = _JUDGE_PROMPT.format(
             question=question,
             result=result_df.head(10).to_string(),

@@ -80,12 +80,12 @@ class GeminiEmbedder:
         from google import genai
         from google.genai import types
 
-        from core.llm import current_api_key
+        from core import llm
 
         keys = [self._key(t) for t in texts]
         missing = list(dict.fromkeys(t for t, k in zip(texts, keys) if k not in self._cache))
         if missing:
-            client = genai.Client(api_key=current_api_key())
+            client = llm.client()
             new = {}
             for i in range(0, len(missing), 100):
                 batch = missing[i : i + 100]

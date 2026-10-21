@@ -9,7 +9,6 @@ from typing import Optional, Tuple
 from config import MODEL_NAME, VISION_EXTRACTION_PROMPT
 from core import tracing
 from core import llm
-from core.llm import current_api_key
 
 
 def extract_table_from_image(
@@ -20,7 +19,7 @@ def extract_table_from_image(
 
     Returns: (csv_string, error_message)
     """
-    client = genai.Client(api_key=current_api_key())
+    client = llm.client()
 
     try:
         image = Image.open(io.BytesIO(image_bytes))

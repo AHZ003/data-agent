@@ -79,7 +79,7 @@ def test_truncated_outputs_are_flagged(monkeypatch):
             assert kw["config"].max_output_tokens == llm.OUTPUT_BUDGET
             return resp
 
-    monkeypatch.setattr(llm.genai, "Client", lambda api_key=None: SimpleNamespace(models=FakeModels()))
+    monkeypatch.setattr(llm.genai, "Client", lambda api_key=None, **kw: SimpleNamespace(models=FakeModels()))
     with tracing.usage_scope() as u:
         assert llm.generate("p", model="gemini-3.8-flash", max_output_tokens=llm.OUTPUT_BUDGET) == "SELECT a FROM"
     assert u.truncated == 1 and u.tokens_out == 1005
