@@ -167,3 +167,21 @@ def test_null_results_match_gold_none(tmp_path):
     with patch.object(coder_agent, "_generate_sql", return_value="SELECT a, b FROM t"):
         [r] = run_examples([ex], lambda e: path, cfg, rule="spider", progress=False)
     assert r.match
+
+
+def test_one_crashing_example_does_not_abort_the_run(tiny_db, tmp_path):
+    def flaky(*a, **k):
+        raise RuntimeError("boom")
+    cfg = RunConfig(benchmark="unit", model="m", mode="single")
+    from benchmarks import text2sql
+    with patch.object(text2sql, "run_example", side_effect=flaky):
+        results = run_examples(_examples(), lambda ex: tiny_db, cfg, rule="spider", cache_dir=tmp_path, progress=False)
+    assert [r.error.split(":")[0] for r in results] == ["ProviderError", "ProviderError"]
+    assert load_cached(cache_path(cfg, tmp_path)) == {}  # retried on the next run
+
+
+def test_transient_classification():
+    from core.llm import is_transient
+    assert is_transient(RuntimeError("503 UNAVAILABLE. The service is currently unavailable."))
+    assert is_transient(RuntimeError("429 RESOURCE_EXHAUSTED"))
+    assert not is_transient(RuntimeError("400 INVALID_ARGUMENT"))

@@ -41,13 +41,19 @@ def _is_auth_error(exc: Exception) -> bool:
     return any(p.lower() in msg for p in _AUTH_PATTERNS)
 
 
+# An unexpected provider/infrastructure failure outside the SQL loop (e.g. an
+# embedding outage during retrieval): terminal for this attempt, and never
+# cached by the benchmarks so a rerun retries it.
+PROVIDER_SENTINEL = "ProviderError"
+
+
 def is_terminal_error(error: str) -> bool:
     """True when a CodeResult error means retrying cannot help.
 
     A query that needs the user's cost confirmation (BigQuery) is terminal
     too: the caller must ask, not the LLM.
     """
-    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL)) or "CostConfirmationRequired" in error
+    return error.startswith((QUOTA_SENTINEL, AUTH_SENTINEL, PROVIDER_SENTINEL)) or "CostConfirmationRequired" in error
 
 
 # Bump when anything that changes the coder's output changes (prompt layout,

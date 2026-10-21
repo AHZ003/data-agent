@@ -123,6 +123,14 @@ def _is_rate_limit(exc: Exception) -> bool:
     return any(p in msg for p in ("resource_exhausted", "429", "quota", "rate limit", "rate_limit"))
 
 
+def is_transient(exc: Exception) -> bool:
+    """Errors worth retrying with backoff: rate limits and provider-side
+    outages (500/503). A 503 from the embedding API once aborted a whole
+    benchmark run."""
+    msg = str(exc).lower()
+    return _is_rate_limit(exc) or any(p in msg for p in ("503", "unavailable", "500 internal", "overloaded"))
+
+
 def generate(
     prompt,
     *,
@@ -142,7 +150,7 @@ def generate(
         model=model, contents=prompt,
         config=genai_types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_output_tokens),
     )
-    response = with_rate_limit_backoff(call, _is_rate_limit) if retry_rate_limits else call()
+    response = with_rate_limit_backoff(call, is_transient) if retry_rate_limits else call()
     _record(response, model)
     _warn_if_truncated(response, model)
     return response.text

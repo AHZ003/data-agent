@@ -89,9 +89,12 @@ class GeminiEmbedder:
             new = {}
             for i in range(0, len(missing), 100):
                 batch = missing[i : i + 100]
-                resp = client.models.embed_content(
-                    model=self.model, contents=batch,
-                    config=types.EmbedContentConfig(output_dimensionality=self.dim),
+                resp = llm.with_rate_limit_backoff(
+                    lambda: client.models.embed_content(
+                        model=self.model, contents=batch,
+                        config=types.EmbedContentConfig(output_dimensionality=self.dim),
+                    ),
+                    llm.is_transient, retries=max(llm.backoff_retries(), 4),
                 )
                 for t, e in zip(batch, resp.embeddings):
                     new[self._key(t)] = list(e.values)

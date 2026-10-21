@@ -287,7 +287,7 @@ def run_examples(
     Examples whose result is a terminal provider error (quota, bad key)
     are not cached, so a rerun retries them.
     """
-    from agents.coder_agent import is_terminal_error
+    from agents.coder_agent import PROVIDER_SENTINEL, is_terminal_error
 
     examples = list(examples)
     path = cache_path(cfg, cache_dir) if cache_dir else None
@@ -302,7 +302,14 @@ def run_examples(
         path.parent.mkdir(parents=True, exist_ok=True)
 
     def _one(ex: Example) -> ExampleResult:
-        r = run_example(ex, db_path_for(ex), cfg, rule)
+        try:
+            r = run_example(ex, db_path_for(ex), cfg, rule)
+        except Exception as e:
+            # One failing question must not abort the run. Recorded as a
+            # provider error (not cached), so a rerun retries it.
+            r = ExampleResult(id=ex.id, db_id=ex.db_id, difficulty=ex.difficulty, question=ex.question,
+                              gold_sql=ex.gold_sql, pred_sql="", match=False,
+                              error=f"{PROVIDER_SENTINEL}: {type(e).__name__}: {str(e)[:200]}")
         with lock:
             done[ex.id] = r
             if path and not (r.error and is_terminal_error(r.error)):
