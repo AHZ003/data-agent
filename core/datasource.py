@@ -50,6 +50,7 @@ class Table:
     primary_key: list[str] = field(default_factory=list)
     foreign_keys: list[ForeignKey] = field(default_factory=list)
     row_count: Optional[int] = None
+    description: Optional[str] = None  # e.g. BigQuery table description (date coverage)
 
     def column(self, name: str) -> Optional[Column]:
         return next((c for c in self.columns if c.name.lower() == name.lower()), None)
@@ -121,6 +122,8 @@ class DataSource:
             if len(t.primary_key) > 1:
                 header += " PRIMARY KEY (" + ", ".join(q(c) for c in t.primary_key) + ")"
             lines = [header]
+            if t.description:
+                lines.append(f"  -- {t.description}")
             fks = {fk.column.lower(): fk for fk in t.foreign_keys}
             # A composite key is shown once on the table line, not per column.
             pk = {c.lower() for c in t.primary_key} if len(t.primary_key) == 1 else set()

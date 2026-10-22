@@ -450,6 +450,7 @@ dependencies = [
 
 [package.optional-dependencies]
 bigquery = [
+    { name = "db-dtypes" },
     { name = "google-cloud-bigquery" },
 ]
 mcp = [
@@ -475,6 +476,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "db-dtypes", marker = "extra == 'bigquery'", specifier = ">=1.2" },
     { name = "duckdb", specifier = ">=1.1" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.25" },
@@ -512,6 +514,22 @@ dev = [
     { name = "mcp", specifier = ">=1.2" },
     { name = "opentelemetry-sdk", specifier = ">=1.27" },
     { name = "pytest", specifier = ">=8.0" },
+]
+
+[[package]]
+name = "db-dtypes"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/53/cf/1f80be231dea89b2f10f0573b3872d26739da54a21f6a9f6c7fc64826865/db_dtypes-1.8.0.tar.gz", hash = "sha256:dee3e8075687bcfc8f5ae247257c267b4264bc7f4b26b0b1978baade1bbf4001", size = 37392, upload-time = "2026-10-15T17:49:30.558Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/9f/6fb7be8c232e480e3dbb093ba864bfb3edd163cc2097f3dd42d0fc20caf0/db_dtypes-1.8.0-py3-none-any.whl", hash = "sha256:8f6d6b9565532171b006f509fbe4faa0ae74dc9b60a54a92b041755d71d7c970", size = 18402, upload-time = "2026-10-15T17:48:58.057Z" },
 ]
 
 [[package]]

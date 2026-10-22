@@ -10,6 +10,9 @@ uploading anything, and must not be able to run up the bill:
 - DEMO_MAX_UPLOAD_MB (default 10) caps uploads.
 - The sample workspace is Chinook (data/chinook.sqlite, 11 tables),
   opened read-only, with suggested questions that exercise joins.
+- With BQ_PROJECT set, a second workspace queries 36M NYC taxi trips in
+  BigQuery (scripts/bigquery_setup.py builds it) behind the dry-run cost
+  guard; BQ_CONFIRM_BYTES / BQ_MAX_BYTES set where it asks and refuses.
 
 Unset DEMO_MODE (or set it to 0) to disable the limits locally.
 """
@@ -36,6 +39,31 @@ SAMPLE_QUESTIONS = [
     "Which support rep's customers spend the most on average?",
     "How many tracks have never been purchased?",
 ]
+
+
+TAXI_QUESTIONS = [
+    "Which 5 pickup zones had the most trips in July 2022?",
+    "How did the number of trips change month by month in 2022?",
+    "What share of trips were paid by credit card in each borough in March 2022?",
+    "What was the average tip percentage for card trips from JFK Airport in 2022?",
+    "Which hour of the day has the longest average trip in June 2022?",
+]
+
+
+def taxi_tables(project: str) -> list[str]:
+    return [f"{project}.nyc_taxi.trips_2022", f"{project}.nyc_taxi.zones"]
+
+
+def taxi_enabled() -> bool:
+    return bool(os.getenv("BQ_PROJECT"))
+
+
+def load_taxi_workspace():
+    """NYC taxi trips in BigQuery: a partitioned 36M-row fact table + zones."""
+    from google.cloud import bigquery
+    from core.bigquery_engine import BigQueryEngine
+    project = os.environ["BQ_PROJECT"]
+    return BigQueryEngine(taxi_tables(project), client=bigquery.Client(project=project), name="nyc_taxi")
 
 
 @dataclass(frozen=True)

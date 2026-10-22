@@ -6,8 +6,12 @@ after that every push to `main` that passes tests deploys automatically via
 
 ## What you get
 
-- The Streamlit app on Cloud Run, scaling to zero (`min-instances 0`: no traffic,
-  no cost) and capped at 2 instances so a traffic spike can't run up the bill.
+- The Streamlit app on Cloud Run, one instance kept warm (`min-instances 1`, so a
+  visitor never waits on a cold start) and capped at 1 so a traffic spike can't
+  run up the bill.
+- The NYC taxi workspace: `python scripts/bigquery_setup.py --project $PROJECT_ID`
+  builds the partitioned BigQuery tables once (~$0.04); the service account needs
+  BigQuery job and data-viewer access (the default compute account's Editor role has both).
 - `GOOGLE_API_KEY` in Secret Manager, never in the image or the repo.
 - Demo guardrails on (`DEMO_MODE=1`): 10 questions per session on the shared
   key, 10 MB uploads, visitors can paste their own key.
@@ -48,9 +52,9 @@ gcloud secrets add-iam-policy-binding gemini-api-key \
 ```bash
 gcloud run deploy dataagent --source . --region $REGION \
   --allow-unauthenticated \
-  --max-instances 1 --min-instances 0 --memory 2Gi --cpu 1 --timeout 3600 --session-affinity \
+  --max-instances 1 --min-instances 1 --memory 2Gi --cpu 1 --timeout 3600 --session-affinity \
   --set-secrets GOOGLE_API_KEY=gemini-api-key:latest \
-  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10,STREAMLIT_SERVER_MAX_UPLOAD_SIZE=25
+  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10,STREAMLIT_SERVER_MAX_UPLOAD_SIZE=25,BQ_PROJECT=$PROJECT_ID,BQ_CONFIRM_BYTES=1073741824,BQ_MAX_BYTES=8589934592
 ```
 
 The command prints the service URL. Open it and ask three sample questions.
@@ -136,7 +140,8 @@ image needs the Postgres extra (`uv sync --extra postgres`); add it to
 
 | Choice | Reason |
 |---|---|
-| `min-instances 0` | Idle demo costs nothing; first request after idle takes a few seconds (cold start) |
+| `min-instances 1` | No cold start: QA saw 30 s+ first loads after idle. Costs ~$18-20/month at the idle rate (1 vCPU, 2 GiB); set 0 to make an idle demo free |
+| `BQ_CONFIRM_BYTES=1 GiB`, `BQ_MAX_BYTES=8 GiB` | Taxi queries over 1 GiB wait for the visitor's "Run it"; over 8 GiB are refused. The whole table is 6.4 GiB, so one query costs at most ~$0.04 |
 | `max-instances 1` | Hard ceiling on spend; also keeps the in-memory per-visitor question cap consistent |
 | `--timeout 3600 --session-affinity` | Streamlit keeps one websocket per browser session. Cloud Run applies the request timeout to it (at 300 s every session was cut after 5 minutes: vanished chat box, lost answers), and without affinity a reconnect can land on the other instance, which has no session |
 | No shared dataset library in demo mode | All visitors share one store workspace; showing "Recent datasets" would let anyone open other people's uploads |

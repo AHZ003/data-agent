@@ -36,10 +36,11 @@ RUN := $(UV) run
 install:
 	$(UV) sync
 
-# requirements.txt is exported from uv.lock for Docker / Streamlit Cloud.
+# requirements.txt is exported from uv.lock for Docker / Streamlit Cloud
+# (with the bigquery extra: the demo has a BigQuery workspace).
 lock:
 	$(UV) lock
-	$(UV) export --no-hashes --no-dev --no-emit-project --format requirements-txt -o requirements.txt
+	$(UV) export --no-hashes --no-dev --no-emit-project --extra bigquery --format requirements-txt -o requirements.txt
 
 run:
 	$(RUN) streamlit run app.py

@@ -68,15 +68,20 @@ class BigQueryEngine(Engine):
         self.confirm_bytes = confirm_bytes if confirm_bytes is not None else int(os.getenv("BQ_CONFIRM_BYTES", str(10 * 2**30)))
         self.max_bytes = max_bytes if max_bytes is not None else int(os.getenv("BQ_MAX_BYTES", str(200 * 2**30)))
         self.timeout_seconds = timeout_seconds
+        # Per-request timeout for metadata, dry runs and job submission. Without
+        # it a stalled HTTP connection blocks forever (an eval run hung 30+ min).
+        self.api_timeout = float(os.getenv("BQ_API_TIMEOUT", "30"))
         self.max_rows = MAX_QUERY_ROWS
         self._datasource: Optional[DataSource] = None
+        self.last_cost: Optional[CostEstimate] = None  # dry run of the latest query, for the UI
 
     def _job_config(self, **kw):
         from google.cloud import bigquery
         return bigquery.QueryJobConfig(**kw)
 
     def dry_run(self, sql: str) -> CostEstimate:
-        job = self.client.query(sql, job_config=self._job_config(dry_run=True, use_query_cache=False))
+        job = self.client.query(sql, job_config=self._job_config(dry_run=True, use_query_cache=False),
+                                timeout=self.api_timeout)
         return estimate(int(job.total_bytes_processed or 0))
 
     def execute_query(
@@ -90,6 +95,7 @@ class BigQueryEngine(Engine):
             cost = self.dry_run(safe_sql)
         except Exception as e:
             return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"
+        self.last_cost = cost
         if cost.bytes_processed > self.max_bytes:
             return None, (f"CostGuard: query would scan {cost.fmt()}, above the "
                           f"{self.max_bytes / 2**30:,.0f} GiB limit. Filter on the partition "
@@ -97,11 +103,21 @@ class BigQueryEngine(Engine):
         if cost.bytes_processed > self.confirm_bytes and not confirm_cost:
             return None, f"{COST_SENTINEL}: query would scan {cost.fmt()}"
         try:
-            job = self.client.query(safe_sql, job_config=self._job_config(maximum_bytes_billed=self.max_bytes))
+            job = self.client.query(safe_sql, job_config=self._job_config(maximum_bytes_billed=self.max_bytes),
+                                    timeout=self.api_timeout)
             rows = job.result(timeout=self.timeout_seconds, max_results=max_rows or self.max_rows)
             return rows.to_dataframe(), None
         except Exception as e:
             return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"
+
+    def sample_frame(self, n: int = 2000) -> pd.DataFrame:
+        """Rows of the primary table for profiling, via tabledata.list (free).
+        A `SELECT *` sample would bill a scan of every column."""
+        df = self.client.list_rows(self.table_name, max_results=n, timeout=self.api_timeout).to_dataframe()
+        for col in df.columns:  # NUMERIC arrives as Decimal objects
+            if df[col].dtype == object and df[col].map(lambda v: v is None or hasattr(v, "as_tuple")).all():
+                df[col] = df[col].astype(float)
+        return df
 
     def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:
         raise NotImplementedError("BigQuery introspection uses table metadata, not queries")
@@ -114,11 +130,11 @@ class BigQueryEngine(Engine):
         return self._datasource
 
     def _describe(self, table_id: str) -> Table:
-        meta = self.client.get_table(table_id)
+        meta = self.client.get_table(table_id, timeout=self.api_timeout)
         part = getattr(getattr(meta, "time_partitioning", None), "field", None)
         cluster = set(getattr(meta, "clustering_fields", None) or [])
         try:  # free: tabledata.list, not a query
-            samples = [dict(r.items()) for r in self.client.list_rows(meta, max_results=5)]
+            samples = [dict(r.items()) for r in self.client.list_rows(meta, max_results=50, timeout=self.api_timeout)]
         except Exception:
             samples = []
         columns = []
@@ -128,10 +144,12 @@ class BigQueryEngine(Engine):
                 notes.append("PARTITION COLUMN: always filter on it to limit bytes scanned")
             elif f.name in cluster:
                 notes.append("clustering column: filters on it are cheaper")
-            vals = [s.get(f.name) for s in samples if s.get(f.name) is not None]
+            # Distinct values: the first rows of a partition are often alike ('0', '0', '0').
+            vals = list(dict.fromkeys(s.get(f.name) for s in samples if s.get(f.name) is not None))
             columns.append(Column(
                 name=f.name, type=f.field_type, nullable=f.mode != "REQUIRED",
                 sample_values=[v if isinstance(v, (str, int, float)) else str(v) for v in vals[:3]],
                 description="; ".join(notes) or None,
             ))
-        return Table(name=table_id, columns=columns, row_count=getattr(meta, "num_rows", None))
+        return Table(name=table_id, columns=columns, row_count=getattr(meta, "num_rows", None),
+                     description=getattr(meta, "description", None) or None)

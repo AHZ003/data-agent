@@ -4,6 +4,23 @@ Every experiment gets a dated entry: what was run, the numbers, and what it
 means. This is the source for the README scoreboard and the write-ups. Newest
 first.
 
+## 2026-10-22 — BigQuery NYC taxi golden set (Gemini 3.8 Flash)
+
+- 40 questions over a partitioned + clustered copy of 2022 yellow trips (36.3M
+  rows): EX 75.0% [60.0, 87.5] strict, 97.5% [92.5, 100] allowing extra columns
+  (9 of 10 strict misses add the ranked-by measure on purpose). One real miss: a
+  zone-name literal the value index would have caught.
+- Partition hints removed: 72.5% / 95.0%, McNemar p = 1.0; identical bytes on
+  date-range questions. The model filters on the date the question names either way.
+- Layout: the same SQL scans 90% less on date-range questions than on the
+  unpartitioned public table (0.060 vs 0.607 GiB), 3% less on whole-year ones.
+- Cost guard did not fire at the default 10 GiB; at the demo's 1 GiB, 2/40
+  ask for confirmation. Total spend: < $0.06 BigQuery, ~$0.50 Gemini.
+- Found and fixed: the BigQuery extra lacked `db-dtypes` (every live query would
+  have failed) and Docker didn't install the extra; BigQuery API calls had no
+  request timeout (an eval run hung for 30+ minutes); the public zone table
+  repeats two zones (joins double-counted).
+
 ## 2026-10-21 — Spider, BIRD, retrieval, models, router, red team (Gemini 3.8 Flash)
 
 All on 200-question difficulty-stratified subsets (seed 0), repair mode unless
@@ -98,4 +115,3 @@ Gold SQL fed through the production execution path and matchers:
 - Fine-tuned 1.5B model and local Qwen-7B on the frontier (GPU run, Ollama).
 - Full 500-question BIRD run for the combined-retrieval config (more power).
 - Semantic cache hit rate on a replayed workload; real-model load test.
-- BigQuery golden set and bytes scanned with/without partition hints (needs GCP).
