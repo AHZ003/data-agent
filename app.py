@@ -28,7 +28,7 @@ from assets.streaming import type_stream
 from agents import storyteller_agent
 from db import store
 from core import pii, tracing
-from core.demo import SAMPLE_QUESTIONS, DemoLimits, load_sample_workspace
+from core.demo import SAMPLE_QUESTIONS, DemoLimits, VisitorBudget, load_sample_workspace
 from core.llm import api_key_override
 import feedback
 
@@ -39,6 +39,22 @@ DEMO = DemoLimits.from_env()
 # any visitor open another visitor's uploads ("Recent datasets"), so nothing
 # is persisted there.
 PERSIST = not DEMO.enabled
+
+
+@st.cache_resource
+def _visitor_budget() -> VisitorBudget:
+    return VisitorBudget()
+
+
+def _visitor_key() -> Optional[str]:
+    """A reload starts a new session, so the demo question cap is counted per
+    visitor (client IP + user agent) as well as per session."""
+    try:
+        h = st.context.headers
+        ip = (h.get("X-Forwarded-For") or "").split(",")[0].strip() or (st.context.ip_address or "")
+        return VisitorBudget.visitor_key(ip, h.get("User-Agent", "")) if ip else None
+    except Exception:
+        return None
 _SAMPLES = {
     "E-Commerce Transactions": "data/ecommerce_transactions.csv",
     "Superstore Sales": "data/superstore_sales.csv",
@@ -496,9 +512,18 @@ if st.session_state.schema is None and _QP_VIEW == "chat" and _QP_DATASET:
     with st.spinner("Restoring your workspace..."):
         restored = _restore_from_url(_QP_DATASET)
     if restored:
-        st.toast("Workspace restored after a reload — earlier answers were cleared.")
+        st.session_state["_restored_notice"] = True
     else:
         st.query_params.clear()
+
+@st.fragment(run_every=60)
+def _keepalive():
+    """Renders nothing. Its periodic rerun is server->browser traffic that keeps
+    the websocket from going idle: in QA, a question typed after ~7 idle
+    minutes was lost while the browser silently reconnected."""
+
+
+_keepalive()
 
 # --- Navigation: handle browser back button ---
 if st.session_state.schema is not None and _QP_VIEW != "chat":
@@ -629,7 +654,7 @@ if st.session_state.schema is None:
 else:
     schema = st.session_state.schema
 
-    nav_l, nav_c, nav_r = st.columns([1, 5, 1])
+    nav_l, nav_c, nav_r = st.columns([1.2, 4, 1.2])
     if nav_l.button("< Back", key="nav_back", width="stretch"):
         clear_session()
         st.rerun()
@@ -655,7 +680,7 @@ else:
         if len(_tables) > 1:
             st.caption("Questions can join across these tables.")
             st.dataframe(
-                pd.DataFrame([{"table": t.name, "rows": t.row_count, "columns": len(t.columns),
+                pd.DataFrame([{"table": t.name, "rows": f"{t.row_count:,}", "columns": len(t.columns),
                                "links to": ", ".join(sorted({fk.ref_table for fk in t.foreign_keys}))}
                               for t in _tables]),
                 width="stretch", hide_index=True,
@@ -672,6 +697,9 @@ else:
         md_clicked = col_b.button("Export Markdown", width="stretch")
     else:
         report_clicked = md_clicked = False
+
+    if st.session_state.pop("_restored_notice", False) and not st.session_state.messages:
+        st.info("Reopened your dataset after the page reloaded. Earlier answers in this chat were cleared.")
 
     # --- Bring your own key (public demo) ---
     if DEMO.enabled:
@@ -731,7 +759,9 @@ else:
         prompt = pending
 
     # --- Handle new chat turn ---
-    allowed, limit_msg = DEMO.question_allowed(st.session_state.questions_asked, st.session_state.user_api_key)
+    _vkey = _visitor_key()
+    _used = max(st.session_state.questions_asked, _visitor_budget().used(_vkey) if _vkey else 0)
+    allowed, limit_msg = DEMO.question_allowed(_used, st.session_state.user_api_key)
     if prompt and not allowed:
         st.warning(limit_msg)
         prompt = None
@@ -741,6 +771,8 @@ else:
         st.session_state.messages.append({"role": "user", "content": prompt})
         if not st.session_state.user_api_key:
             st.session_state.questions_asked += 1
+            if _vkey:
+                _visitor_budget().charge(_vkey)
         key_scope = api_key_override(st.session_state.user_api_key)
         key_scope.__enter__()
         try:

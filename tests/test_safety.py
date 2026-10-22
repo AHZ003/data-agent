@@ -99,5 +99,5 @@ def test_storyteller_keeps_names_but_hides_high_risk_pii():
 
 def test_summary_states_true_row_count():
     from agents.storyteller_agent import summarize_result
-    s = summarize_result(pd.DataFrame({"country": [f"c{i}" for i in range(25)], "n": range(25)}))
-    assert "first 20 of 25 rows" in s
+    s = summarize_result(pd.DataFrame({"country": [f"c{i}" for i in range(60)], "n": range(60)}))
+    assert "first 50 of 60 rows" in s

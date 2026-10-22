@@ -42,7 +42,7 @@ ANALYSIS CONTEXT:
 Write the narrative now. Lead with the key finding, include specific numbers, and end with an actionable takeaway."""
 
 
-def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
+def summarize_result(df, pii_report=None, max_rows: int = 50) -> str:
     """The result table as the Storyteller may see it.
 
     PII columns are masked, instruction-like cells neutralized, and in
@@ -61,7 +61,8 @@ def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
         safe = pii.mask_frame(safe, pii_report)
     text = safe.to_string()
     if len(df) > max_rows:
-        # The narrative once said "19 countries" for a 25-row result it only saw 20 of.
+        # The narrative once said "19 countries" for a 25-row result it only saw 20 of;
+        # 50 rows covers one row per group for typical "by country/genre" questions.
         text += f"\n(showing the first {max_rows} of {len(df):,} rows; the full result has {len(df):,} rows)"
     return text
 
