@@ -504,10 +504,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pending-needs-gcp-credentials" class="md-nav__link">
+  <a href="#nyc-taxi-on-bigquery-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pending (needs GCP credentials)
+        NYC taxi on BigQuery: results
       
     </span>
   </a>
@@ -1120,10 +1120,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pending-needs-gcp-credentials" class="md-nav__link">
+  <a href="#nyc-taxi-on-bigquery-results" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pending (needs GCP credentials)
+        NYC taxi on BigQuery: results
       
     </span>
   </a>
@@ -1239,15 +1239,114 @@ interactive answer and a multi-second wait on every question.</p>
 <p>Schemas cost nothing to describe: column metadata comes from the table, sample
 values from <code>list_rows</code> (free), and the partition and clustering columns are
 flagged in the schema the Coder sees.</p>
-<h2 id="pending-needs-gcp-credentials">Pending (needs GCP credentials)</h2>
+<h2 id="nyc-taxi-on-bigquery-results">NYC taxi on BigQuery: results</h2>
+<p><strong>Data.</strong> The public <code>tlc_yellow_trips_2022</code> table is not partitioned or
+clustered, so every query scans each column it references in full.
+<code>scripts/bigquery_setup.py</code> copies it into the project the way a data team
+would store a 36M-row fact table: <code>nyc_taxi.trips_2022</code> partitioned by
+<code>DATE(pickup_datetime)</code> and clustered by <code>pickup_location_id</code> (36,255,983
+rows, 6.4 GiB), plus <code>nyc_taxi.zones</code> (260 zones). The source has no December
+data (57 stray rows on Dec 1); the table description says so, and the Coder
+sees it. One-time cost about $0.04.</p>
+<p><strong>Golden set.</strong> 40 questions (<code>benchmarks/cases_bigquery.yaml</code>): 31 name a
+date range, 9 cover the whole year, 13 need a join to <code>zones</code>. Every gold query
+was run and its answer checked by hand. Gemini 3.8 Flash, one run each:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Partition hints on</th>
+<th>Hints removed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EX, strict (Spider rule)</td>
+<td>75.0% [60.0, 87.5]</td>
+<td>72.5% [57.5, 85.0]</td>
+</tr>
+<tr>
+<td>EX, extra columns allowed</td>
+<td><strong>97.5%</strong> [92.5, 100]</td>
+<td>95.0% [87.5, 100]</td>
+</tr>
+<tr>
+<td>Mean scanned, date-range questions</td>
+<td>0.060 GiB</td>
+<td>0.060 GiB</td>
+</tr>
+<tr>
+<td>Mean scanned, all questions</td>
+<td>0.23 GiB</td>
+<td>0.20 GiB</td>
+</tr>
+<tr>
+<td>Cost guard / confirmation fired (10 GiB default)</td>
+<td>0</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
 <ul>
-<li><code>python -m benchmarks.bigquery_eval --check</code>: validate the 12 scaffold gold
-  queries with free dry runs, then extend <code>benchmarks/cases_bigquery.yaml</code> to
-  30–50 cases.</li>
-<li>Bytes scanned with vs without partition hints
-  (<code>bigquery_eval</code> vs <code>bigquery_eval --no-partition-hints</code>) and how often the
-  cost guard fires.</li>
+<li><strong>Strict vs extra columns.</strong> 9 of the 10 strict misses return the right rows
+  plus the measure they ranked by ("which hour had the most pickups" → hour and
+  count). The coder prompt asks for that on purpose: in the live demo a bare
+  "Central" with no number read as a bug. Strict matching scores it wrong, so
+  both numbers are reported.</li>
+<li><strong>The one real miss</strong> (bq_040) filters on <code>'Times Square/Theatre District'</code>;
+  the stored value is <code>'Times Sq/Theatre District'</code>. The value index that fixes
+  this on SQLite/DuckDB isn't wired to BigQuery yet.</li>
+<li><strong>Partition hints don't matter here</strong> (1 question differs, McNemar p = 1.0;
+  same bytes on date-range questions). The questions name their dates, so the
+  model filters on <code>pickup_datetime</code> with or without the schema note.</li>
 </ul>
+<p><strong>What the layout saves.</strong> The same 40 generated queries, dry-run against the
+unpartitioned public table (<code>outputs/bigquery/layout_comparison.json</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Questions</th>
+<th>Partitioned + clustered</th>
+<th>Unpartitioned</th>
+<th>Saved</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Date range (31)</td>
+<td>0.060 GiB</td>
+<td>0.607 GiB</td>
+<td><strong>90%</strong></td>
+</tr>
+<tr>
+<td>Whole year (9)</td>
+<td>0.813 GiB</td>
+<td>0.836 GiB</td>
+<td>3%</td>
+</tr>
+<tr>
+<td>All (40)</td>
+<td>0.229 GiB</td>
+<td>0.658 GiB</td>
+<td>65%</td>
+</tr>
+</tbody>
+</table>
+<p>The bytes saving comes from the table design plus the model's habit of
+filtering on dates. Prompt hints add nothing when the question already names a
+range. At on-demand prices the 40 questions cost $0.056 on the partitioned
+table and $0.161 on the public one.</p>
+<p><strong>In the demo.</strong> The "NYC taxi trips" workspace shows the dry-run size and
+price under every answer. With the demo's 1 GiB confirmation threshold, 2 of the
+40 golden questions (the whole-year JFK tip percentage, 1.6 GiB, and the
+whole-year long-trip fare, 1.35 GiB) stop for a "Run it" click; 8 GiB is the
+hard cap, above the whole table's 6.4 GiB.</p>
+<p>Reproduce:</p>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>scripts/bigquery_setup.py<span class="w"> </span>--project<span class="w"> </span><span class="nv">$BQ_PROJECT</span>
+python<span class="w"> </span>-m<span class="w"> </span>benchmarks.bigquery_eval<span class="w"> </span>--check<span class="w">            </span><span class="c1"># free dry runs</span>
+python<span class="w"> </span>-m<span class="w"> </span>benchmarks.bigquery_eval<span class="w">                    </span><span class="c1"># hints on  (~$0.25 Gemini + &lt;$0.06 BigQuery)</span>
+python<span class="w"> </span>-m<span class="w"> </span>benchmarks.bigquery_eval<span class="w"> </span>--no-partition-hints
+</code></pre></div>
 
 
 

@@ -653,6 +653,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#2026-10-22-bigquery-nyc-taxi-golden-set-gemini-38-flash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-22 — BigQuery NYC taxi golden set (Gemini 3.8 Flash)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#2026-10-21-spider-bird-retrieval-models-router-red-team-gemini-38-flash" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1164,6 +1175,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#2026-10-22-bigquery-nyc-taxi-golden-set-gemini-38-flash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2026-10-22 — BigQuery NYC taxi golden set (Gemini 3.8 Flash)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#2026-10-21-spider-bird-retrieval-models-router-red-team-gemini-38-flash" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1286,6 +1308,23 @@
 <p>Every experiment gets a dated entry: what was run, the numbers, and what it
 means. This is the source for the README scoreboard and the write-ups. Newest
 first.</p>
+<h2 id="2026-10-22-bigquery-nyc-taxi-golden-set-gemini-38-flash">2026-10-22 — BigQuery NYC taxi golden set (Gemini 3.8 Flash)</h2>
+<ul>
+<li>40 questions over a partitioned + clustered copy of 2022 yellow trips (36.3M
+  rows): EX 75.0% [60.0, 87.5] strict, 97.5% [92.5, 100] allowing extra columns
+  (9 of 10 strict misses add the ranked-by measure on purpose). One real miss: a
+  zone-name literal the value index would have caught.</li>
+<li>Partition hints removed: 72.5% / 95.0%, McNemar p = 1.0; identical bytes on
+  date-range questions. The model filters on the date the question names either way.</li>
+<li>Layout: the same SQL scans 90% less on date-range questions than on the
+  unpartitioned public table (0.060 vs 0.607 GiB), 3% less on whole-year ones.</li>
+<li>Cost guard did not fire at the default 10 GiB; at the demo's 1 GiB, 2/40
+  ask for confirmation. Total spend: &lt; $0.06 BigQuery, ~$0.50 Gemini.</li>
+<li>Found and fixed: the BigQuery extra lacked <code>db-dtypes</code> (every live query would
+  have failed) and Docker didn't install the extra; BigQuery API calls had no
+  request timeout (an eval run hung for 30+ minutes); the public zone table
+  repeats two zones (joins double-counted).</li>
+</ul>
 <h2 id="2026-10-21-spider-bird-retrieval-models-router-red-team-gemini-38-flash">2026-10-21 — Spider, BIRD, retrieval, models, router, red team (Gemini 3.8 Flash)</h2>
 <p>All on 200-question difficulty-stratified subsets (seed 0), repair mode unless
 noted, 95% bootstrap CIs, paired exact McNemar. Total spend for the day ≈ $23.</p>
@@ -1368,7 +1407,6 @@ file reads), current stack 0. Legitimate queries wrongly blocked: 3/8 → 0/8.</
 <li>Fine-tuned 1.5B model and local Qwen-7B on the frontier (GPU run, Ollama).</li>
 <li>Full 500-question BIRD run for the combined-retrieval config (more power).</li>
 <li>Semantic cache hit rate on a replayed workload; real-model load test.</li>
-<li>BigQuery golden set and bytes scanned with/without partition hints (needs GCP).</li>
 </ul>
 
 

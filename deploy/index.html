@@ -1266,8 +1266,12 @@ after that every push to <code>main</code> that passes tests deploys automatical
 <code>.github/workflows/deploy.yml</code>.</p>
 <h2 id="what-you-get">What you get</h2>
 <ul>
-<li>The Streamlit app on Cloud Run, scaling to zero (<code>min-instances 0</code>: no traffic,
-  no cost) and capped at 2 instances so a traffic spike can't run up the bill.</li>
+<li>The Streamlit app on Cloud Run, one instance kept warm (<code>min-instances 1</code>, so a
+  visitor never waits on a cold start) and capped at 1 so a traffic spike can't
+  run up the bill.</li>
+<li>The NYC taxi workspace: <code>python scripts/bigquery_setup.py --project $PROJECT_ID</code>
+  builds the partitioned BigQuery tables once (~$0.04); the service account needs
+  BigQuery job and data-viewer access (the default compute account's Editor role has both).</li>
 <li><code>GOOGLE_API_KEY</code> in Secret Manager, never in the image or the repo.</li>
 <li>Demo guardrails on (<code>DEMO_MODE=1</code>): 10 questions per session on the shared
   key, 10 MB uploads, visitors can paste their own key.</li>
@@ -1300,9 +1304,9 @@ gcloud<span class="w"> </span>secrets<span class="w"> </span>add-iam-policy-bind
 <h2 id="3-first-deploy-manual">3. First deploy (manual)</h2>
 <div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>deploy<span class="w"> </span>dataagent<span class="w"> </span>--source<span class="w"> </span>.<span class="w"> </span>--region<span class="w"> </span><span class="nv">$REGION</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--allow-unauthenticated<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--max-instances<span class="w"> </span><span class="m">1</span><span class="w"> </span>--min-instances<span class="w"> </span><span class="m">0</span><span class="w"> </span>--memory<span class="w"> </span>2Gi<span class="w"> </span>--cpu<span class="w"> </span><span class="m">1</span><span class="w"> </span>--timeout<span class="w"> </span><span class="m">3600</span><span class="w"> </span>--session-affinity<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-instances<span class="w"> </span><span class="m">1</span><span class="w"> </span>--min-instances<span class="w"> </span><span class="m">1</span><span class="w"> </span>--memory<span class="w"> </span>2Gi<span class="w"> </span>--cpu<span class="w"> </span><span class="m">1</span><span class="w"> </span>--timeout<span class="w"> </span><span class="m">3600</span><span class="w"> </span>--session-affinity<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--set-secrets<span class="w"> </span><span class="nv">GOOGLE_API_KEY</span><span class="o">=</span>gemini-api-key:latest<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--set-env-vars<span class="w"> </span><span class="nv">DEMO_MODE</span><span class="o">=</span><span class="m">1</span>,DEMO_MAX_QUESTIONS_PER_SESSION<span class="o">=</span><span class="m">10</span>,DEMO_MAX_UPLOAD_MB<span class="o">=</span><span class="m">10</span>,STREAMLIT_SERVER_MAX_UPLOAD_SIZE<span class="o">=</span><span class="m">25</span>
+<span class="w">  </span>--set-env-vars<span class="w"> </span><span class="nv">DEMO_MODE</span><span class="o">=</span><span class="m">1</span>,DEMO_MAX_QUESTIONS_PER_SESSION<span class="o">=</span><span class="m">10</span>,DEMO_MAX_UPLOAD_MB<span class="o">=</span><span class="m">10</span>,STREAMLIT_SERVER_MAX_UPLOAD_SIZE<span class="o">=</span><span class="m">25</span>,BQ_PROJECT<span class="o">=</span><span class="nv">$PROJECT_ID</span>,BQ_CONFIRM_BYTES<span class="o">=</span><span class="m">1073741824</span>,BQ_MAX_BYTES<span class="o">=</span><span class="m">8589934592</span>
 </code></pre></div>
 <p>The command prints the service URL. Open it and ask three sample questions.</p>
 <h2 id="4-budget-alert">4. Budget alert</h2>
@@ -1376,8 +1380,12 @@ image needs the Postgres extra (<code>uv sync --extra postgres</code>); add it t
 </thead>
 <tbody>
 <tr>
-<td><code>min-instances 0</code></td>
-<td>Idle demo costs nothing; first request after idle takes a few seconds (cold start)</td>
+<td><code>min-instances 1</code></td>
+<td>No cold start: QA saw 30 s+ first loads after idle. Costs ~$18-20/month at the idle rate (1 vCPU, 2 GiB); set 0 to make an idle demo free</td>
+</tr>
+<tr>
+<td><code>BQ_CONFIRM_BYTES=1 GiB</code>, <code>BQ_MAX_BYTES=8 GiB</code></td>
+<td>Taxi queries over 1 GiB wait for the visitor's "Run it"; over 8 GiB are refused. The whole table is 6.4 GiB, so one query costs at most ~$0.04</td>
 </tr>
 <tr>
 <td><code>max-instances 1</code></td>
