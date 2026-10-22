@@ -61,8 +61,10 @@ def validate_sql_result(
     # Scipy-backed statistical audit: IQR outliers + high-skew flags.
     # See core/stats.py — this replaces the old "len(df) < 30, be
     # careful" hand-waving with real math the critic can stand behind.
+    # Distribution checks need a sample; a 5-row "top artists" result is a
+    # summary, and skew/outlier warnings on it are noise (QA feedback).
     try:
-        stats_warnings = da_stats.audit_dataframe(df)
+        stats_warnings = da_stats.audit_dataframe(df) if len(df) >= 20 else []
         for w in stats_warnings:
             warnings.append(w)
             confidence -= 5

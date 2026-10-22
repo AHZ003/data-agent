@@ -288,7 +288,7 @@ def visualizer_node(state: AgentState) -> AgentState:
 def predictor_node(state: AgentState) -> AgentState:
     """Run the Predictor Agent for ML tasks."""
     start = time.time()
-    plan = state.get("plan", {})
+    plan = (state.get("plan") or {})
     analysis_types = plan.get("analysis_types", [])
     _, df = _resources(state)
     schema = SemanticSchema(**state["schema"])
@@ -355,7 +355,7 @@ def storyteller_node(state: AgentState) -> AgentState:
     result_df = state.get("result_df")
     result_summary = storyteller_agent.summarize_result(result_df, _pii_report(state))
 
-    validation = state.get("validation", {})
+    validation = (state.get("validation") or {})
     warnings = validation.get("warnings", [])
 
     with tracing.span("storyteller", model=MODEL_NAME) as _t:
@@ -363,7 +363,7 @@ def storyteller_node(state: AgentState) -> AgentState:
             question=state["question"],
             sql_query=state.get("sql_query", ""),
             result_summary=result_summary,
-            chart_description=state.get("chart_config", {}).get("chart_type", ""),
+            chart_description=(state.get("chart_config") or {}).get("chart_type", ""),
             validation_warnings=warnings,
             prediction_info=state.get("prediction"),
         )
@@ -390,7 +390,7 @@ def storyteller_node(state: AgentState) -> AgentState:
 
 def should_predict(state: AgentState) -> str:
     """Determine if prediction is needed."""
-    plan = state.get("plan", {})
+    plan = (state.get("plan") or {})
     analysis_types = plan.get("analysis_types", [])
     prediction_types = {"prediction", "segmentation", "anomaly"}
     if prediction_types.intersection(set(analysis_types)):
@@ -409,7 +409,7 @@ def should_retry(state: AgentState) -> str:
     if coder_agent.is_terminal_error(state.get("error") or ""):
         return "continue"
 
-    validation = state.get("validation", {})
+    validation = (state.get("validation") or {})
     status = validation.get("status", "validated")
     retry_count = state.get("retry_count", 0)
 

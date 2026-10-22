@@ -141,9 +141,15 @@ def mask_datasource(ds: DataSource, report: Optional[PIIReport] = None) -> DataS
     return replace(ds, tables=tables)
 
 
-def mask_frame(df, report: PIIReport, table_hint: Optional[str] = None):
-    """Mask result columns whose name matches a detected PII column (or whose
-    values look like PII) before the Storyteller sees them."""
+# Identifiers that are dangerous to send anywhere. Names, addresses and birth
+# dates are masked in prompts' sample values, but when a user asks "which rep
+# sells the most?" the name IS the answer, so result rows keep them (QA found
+# narratives reading "<PERSON> <PERSON>"). Local-only mode hides everything.
+HIGH_RISK = frozenset({"EMAIL", "PHONE", "SSN", "CARD", "IBAN", "IP"})
+
+
+def mask_frame(df, report: PIIReport, table_hint: Optional[str] = None, kinds=HIGH_RISK):
+    """Mask high-risk PII columns in a result before the Storyteller sees it."""
     import pandas as pd
 
     if df is None:
@@ -152,6 +158,6 @@ def mask_frame(df, report: PIIReport, table_hint: Optional[str] = None):
     out = df.copy()
     for col in out.columns:
         kind = pii_names.get(str(col).lower()) or column_kind(str(col), out[col].head(20).tolist())
-        if kind:
+        if kind and kind in kinds:
             out[col] = pd.Series([f"<{kind}>"] * len(out), index=out.index, dtype=object)
     return out

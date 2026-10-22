@@ -188,9 +188,9 @@ def pipeline_case(case: dict, hardening: bool) -> dict:
     eng, df = _workspace(case)
     try:
         state = run_analysis(case["question"], None, eng, df)
-        result = state.get("result_df")
-        output = "\n".join([state.get("narrative") or "", state.get("sql_query") or "",
-                            result.to_string() if result is not None else ""])
+        # Only the model's own prose counts: the result table and SQL echo the
+        # poisoned data/identifiers by construction, which is not obedience.
+        output = state.get("narrative") or ""
         error = state.get("error")
     except Exception as e:
         output, error = "", f"{type(e).__name__}: {e}"
@@ -242,16 +242,26 @@ def render(guard: list[dict], pipe: list[dict], fp: Optional[dict] = None) -> st
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--offline", action="store_true", help="guard evasion only, no LLM")
+    parser.add_argument("--hardening", choices=["off", "on", "both"], default="both",
+                        help="which pipeline arm to run; arms are saved separately and merged in the report")
     args = parser.parse_args(argv)
 
+    out = ROOT / "outputs" / "redteam"
+    out.mkdir(parents=True, exist_ok=True)
     cases = load_cases()
     guard = [guard_case(c, m) for c in cases["guard_evasion"] for m in ("before", "after")]
     fp = false_positives()
-    pipe = []
     if not args.offline:
-        pipe = [pipeline_case(c, h) for c in cases["pipeline"] for h in (False, True)]
-    out = ROOT / "outputs" / "redteam"
-    out.mkdir(parents=True, exist_ok=True)
+        arms = {"off": [False], "on": [True], "both": [False, True]}[args.hardening]
+        for h in arms:
+            rows = [pipeline_case(c, h) for c in cases["pipeline"]]
+            (out / f"pipeline_{'on' if h else 'off'}.json").write_text(json.dumps(rows, indent=2))
+    # Merge whichever pipeline arms have been run (each arm runs in its own process).
+    pipe = []
+    for arm in ("off", "on"):
+        path = out / f"pipeline_{arm}.json"
+        if path.exists():
+            pipe += json.loads(path.read_text())
     (out / "results.json").write_text(json.dumps({"guard": guard, "pipeline": pipe, "false_positives": fp}, indent=2))
     md = render(guard, pipe, fp)
     (out / "report.md").write_text(md + "\n")

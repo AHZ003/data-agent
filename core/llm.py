@@ -88,9 +88,47 @@ def api_key_override(key: Optional[str]) -> Iterator[None]:
 
 # ── Generation ──────────────────────────────────────────────────────────
 
+# Thinking models (Gemini 3.x) spend output tokens on reasoning before the
+# answer, and those count against max_output_tokens. A tight limit (the old
+# 1,024) truncated SQL mid-statement on ~3% of questions. Billing is per
+# token actually generated, so a generous ceiling costs nothing extra.
+OUTPUT_BUDGET = int(os.getenv("DATAAGENT_MAX_OUTPUT_TOKENS", "8192"))
+
+_log = __import__("logging").getLogger("dataagent.llm")
+
+# Without a timeout one stalled HTTP request blocks a benchmark worker (and
+# an API request) forever; it happened once in a 200-question Spider run.
+REQUEST_TIMEOUT_S = float(os.getenv("DATAAGENT_LLM_TIMEOUT_S", "120"))
+
+
+def client():
+    """The Gemini client for this call: session API key + request timeout."""
+    return genai.Client(api_key=current_api_key(),
+                        http_options=genai_types.HttpOptions(timeout=int(REQUEST_TIMEOUT_S * 1000)))
+
+
+def _warn_if_truncated(response, model: str) -> None:
+    """Truncated answers look like valid-but-wrong output; make them loud."""
+    try:
+        reason = response.candidates[0].finish_reason
+    except (AttributeError, IndexError, TypeError):
+        return
+    if str(getattr(reason, "name", reason)) == "MAX_TOKENS":
+        from core import tracing
+        _log.warning("LLM output truncated at max_output_tokens (model=%s)", model)
+        tracing.mark_truncated()
+
 def _is_rate_limit(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(p in msg for p in ("resource_exhausted", "429", "quota", "rate limit", "rate_limit"))
+
+
+def is_transient(exc: Exception) -> bool:
+    """Errors worth retrying with backoff: rate limits and provider-side
+    outages (500/503). A 503 from the embedding API once aborted a whole
+    benchmark run."""
+    msg = str(exc).lower()
+    return _is_rate_limit(exc) or any(p in msg for p in ("503", "unavailable", "500 internal", "overloaded"))
 
 
 def generate(
@@ -107,14 +145,16 @@ def generate(
     model = model or MODEL_NAME
     if model.startswith("ollama/"):
         return _ollama(prompt, model, temperature, max_output_tokens)
-    client = genai.Client(api_key=current_api_key())
-    call = lambda: client.models.generate_content(  # noqa: E731
+    gemini = client()
+    call = lambda: gemini.models.generate_content(  # noqa: E731
         model=model, contents=prompt,
         config=genai_types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_output_tokens),
     )
-    response = with_rate_limit_backoff(call, _is_rate_limit) if retry_rate_limits else call()
+    response = with_rate_limit_backoff(call, is_transient) if retry_rate_limits else call()
     _record(response, model)
-    return response.text
+    _warn_if_truncated(response, model)
+    # Blocked or empty candidates come back as text=None; callers expect a str.
+    return response.text or ""
 
 
 def generate_stream(
@@ -127,9 +167,9 @@ def generate_stream(
     if model.startswith("ollama/"):
         yield _ollama(prompt, model, temperature, max_output_tokens)
         return
-    client = genai.Client(api_key=current_api_key())
+    gemini = client()
     last = None
-    for chunk in client.models.generate_content_stream(
+    for chunk in gemini.models.generate_content_stream(
         model=model, contents=prompt,
         config=genai_types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_output_tokens),
     ):
@@ -139,6 +179,7 @@ def generate_stream(
             yield text
     # Streamed usage metadata is cumulative; the last chunk has the total.
     _record(last, model)
+    _warn_if_truncated(last, model)
 
 
 def _record(response, model: str) -> None:

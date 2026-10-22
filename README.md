@@ -2,15 +2,17 @@
 
 **A text-to-SQL analytics agent built to be measured.** Ask a question about your data (CSV/Parquet, SQLite, DuckDB, BigQuery); get the SQL that ran, the result, a chart and a short narrative — from a LangGraph pipeline where every change is evaluated with confidence intervals and paired significance tests, every query passes a three-layer guard, and every LLM call is traced with tokens and cost.
 
-**[Live demo](https://ahz003-data-agent.streamlit.app)** · [Docs](docs/index.md) · [Evaluation methodology](benchmarks/README.md) · [System card](docs/system_card.md)
+**[Live demo](https://dataagent-792621716813.us-central1.run.app)** · [Docs](docs/index.md) · [Evaluation methodology](benchmarks/README.md) · [System card](docs/system_card.md)
 
 <!-- TODO: demo recording (docs/assets/demo.gif) -->
+
+![Cost vs accuracy on Spider](docs/pareto_spider.svg)
 
 ---
 
 ## Scoreboard
 
-Measured numbers only; **pending** rows need a run with a valid Gemini key (commands in [docs/results.md](docs/results.md)).
+Measured numbers only, Gemini 3.8 Flash unless stated; 200-question difficulty-stratified subsets; 95% bootstrap CIs; paired comparisons use exact McNemar. Log: [docs/results.md](docs/results.md).
 
 | Metric | Result |
 |---|---|
@@ -20,11 +22,15 @@ Measured numbers only; **pending** rows need a run with a valid Gemini key (comm
 | DuckDB vs SQLite, 10M-row group-by | **2,169 ms → 16 ms** (137×) |
 | Service overhead under load (stubbed LLM, 1 process) | 0 failures to 200 users; p50 at the model-time floor up to ~100 users; 2 real bottlenecks found and fixed ([performance](docs/performance.md)) |
 | Eval sensitivity (power analysis) | n=200 detects ≥6–9 pt paired changes; identical configs differ ≥2 pts 51% of the time ([why](docs/blog/draft-improvements-are-noise.md)) |
-| Spider dev EX (repair) · BIRD mini-dev EX (evidence on / off) | **pending** |
-| Self-repair lift · retrieval lift (BIRD), with McNemar p | **pending** |
-| Chinook golden SQL EX (CI gate baseline) | **pending** |
-| Router / fine-tuned 1.5B model on the cost–accuracy frontier | **pending** (needs Gemini Pro, Ollama, a GPU run) |
-| Red team, data-borne prompt injection (18 attacks) | **pending** |
+| Spider dev EX | **86.0%** [81.0, 90.5] at $0.0049/question |
+| BIRD mini-dev EX, evidence hints on / off | **72.5%** [66.0, 78.5] / **55.0%** [48.0, 62.0]; hints worth −17.5 pts when removed (p = 8×10⁻⁸) |
+| Chinook golden SQL EX (CI gate baseline) | **97.1%** [93.3, 100.0] at $0.0044/question |
+| Self-repair lift | **none measurable**: Spider +0.5 pts (p = 1.0), BIRD +0.0 (p = 1.0) — the model's SQL almost always runs; its misses are runnable-but-wrong |
+| Retrieval on BIRD | each component alone ±1 pt (n.s.); all combined **76.0%**, +3.5 pts [−0.5, +7.5], p = 0.14 — promising, not significant at n=200 |
+| Cost/accuracy frontier (Spider) | Flash-Lite 82.0% at $0.0005 · 3.8 Flash 86.0% at $0.0049 · 3.1 Pro 88.0% at $0.0111 ([chart](docs/pareto_spider.svg)) |
+| Difficulty router, Flash-Lite → Flash | Flash's 84% at **59% of its cost** (held-out n=100); 83% at 48% |
+| Fine-tuned 1.5B open model | **pending** (GPU run) |
+| Red team, data-borne prompt injection (18 attacks) | 1/18 succeed with prompt hardening off, **0/18** on (1 vs 0 is not a significant difference) |
 | Tests | **284**, ~10 s, no API key |
 
 ---

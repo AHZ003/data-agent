@@ -63,3 +63,27 @@ def test_coder_uses_its_configured_model(fake_ollama, monkeypatch):
     ds = DataSource.from_dataframes({"t": pd.DataFrame({"a": [1]})})
     assert coder_agent._generate_sql("q", ds) == "SELECT 1"
     assert fake_ollama[-1]["model"] == "local-coder"
+
+
+def test_truncated_outputs_are_flagged(monkeypatch):
+    from types import SimpleNamespace
+
+    resp = SimpleNamespace(
+        text="SELECT a FROM",
+        candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name="MAX_TOKENS"))],
+        usage_metadata=SimpleNamespace(prompt_token_count=10, candidates_token_count=5, thoughts_token_count=1000),
+    )
+
+    class FakeModels:
+        def generate_content(self, **kw):
+            assert kw["config"].max_output_tokens == llm.OUTPUT_BUDGET
+            return resp
+
+    monkeypatch.setattr(llm.genai, "Client", lambda api_key=None, **kw: SimpleNamespace(models=FakeModels()))
+    with tracing.usage_scope() as u:
+        assert llm.generate("p", model="gemini-3.8-flash", max_output_tokens=llm.OUTPUT_BUDGET) == "SELECT a FROM"
+    assert u.truncated == 1 and u.tokens_out == 1005
+
+
+def test_output_budget_leaves_room_for_thinking():
+    assert llm.OUTPUT_BUDGET >= 4096

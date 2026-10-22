@@ -19,7 +19,7 @@ from agents.storyteller_agent import generate_full_report, report_to_markdown
 from agents.orchestrator import run_analysis, run_analysis_stream
 from models.analysis_plan import SemanticSchema, ColumnRole
 from assets.ui import (
-    inject_theme, section_label, hero, feature_card,
+    inject_theme, section_label, hero, feature_grid,
     result_header, narrative_block, chip, icon,
 )
 from assets.plotly_theme import register as register_plotly_theme
@@ -27,10 +27,52 @@ from assets.pdf_export import build_report_pdf
 from assets.streaming import type_stream
 from agents import storyteller_agent
 from db import store
-from core import tracing
+from core import pii, tracing
+from core.demo import SAMPLE_QUESTIONS, DemoLimits, VisitorBudget, load_sample_workspace
+from core.llm import api_key_override
+import feedback
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 MAX_ROWS_INGEST = 500_000
+DEMO = DemoLimits.from_env()
+# The store has one workspace for everyone. On the public demo that would let
+# any visitor open another visitor's uploads ("Recent datasets"), so nothing
+# is persisted there.
+PERSIST = not DEMO.enabled
+
+
+@st.cache_resource
+def _visitor_budget() -> VisitorBudget:
+    return VisitorBudget()
+
+
+def _visitor_key() -> Optional[str]:
+    """A reload starts a new session, so the demo question cap is counted per
+    visitor (client IP + user agent) as well as per session."""
+    try:
+        h = st.context.headers
+        ip = (h.get("X-Forwarded-For") or "").split(",")[0].strip() or (st.context.ip_address or "")
+        return VisitorBudget.visitor_key(ip, h.get("User-Agent", "")) if ip else None
+    except Exception:
+        return None
+_SAMPLES = {
+    "E-Commerce Transactions": "data/ecommerce_transactions.csv",
+    "Superstore Sales": "data/superstore_sales.csv",
+    "Employee Data": "data/employee_data.csv",
+}
+
+
+def md_safe(text: str) -> str:
+    """Streamlit renders $...$ as LaTeX: "$77,623 ... $38.90" became one
+    garbled italic formula. Escape dollar signs for display only."""
+    return (text or "").replace("$", "\\$")
+
+
+def _escaped(chunks, sink: list):
+    """Stream chunks escaped for display while keeping the raw text in `sink`."""
+    for c in chunks:
+        sink.append(c)
+        yield md_safe(c)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +117,8 @@ _DEFAULTS = {
     "stream_target": None,
     "workspace_id": None,
     "dataset_id": None,
+    "user_api_key": "",
+    "questions_asked": 0,
 }
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
@@ -88,22 +132,16 @@ if st.session_state.workspace_id is None:
 # --- Helpers ---
 
 def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
-                  original_filename: Optional[str] = None, persist: bool = True):
+                  original_filename: Optional[str] = None, persist: bool = True,
+                  extra_tables: Optional[dict] = None):
+    """Load the primary table (and any extra uploaded tables) and profile it."""
     db = Database()
     db.load_dataframe(df, table_name)
+    for name, extra in (extra_tables or {}).items():
+        db.load_dataframe(extra, name)
     schema = profile_dataframe(df, table_name)
-    st.session_state.db = db
-    st.session_state.df = df
-    st.session_state.schema = schema
-    st.session_state.messages = []
-    st.session_state.analyses = []
-    st.session_state.agent_log = []
-    st.session_state.stream_target = None
-
-    st.query_params["view"] = "chat"
-    st.query_params["ds"] = table_name
-
-    if persist and st.session_state.workspace_id:
+    _set_workspace(db, df, schema, table_name)
+    if persist and PERSIST and st.session_state.workspace_id:
         try:
             dsid = store.save_dataset(
                 workspace_id=st.session_state.workspace_id,
@@ -115,6 +153,29 @@ def init_database(df: pd.DataFrame, table_name: str = DEFAULT_TABLE_NAME,
             st.session_state.dataset_id = dsid
         except Exception:
             log.exception("Failed to persist dataset")
+
+
+def init_sample_workspace():
+    """Chinook: a real 11-table music-store database, opened read-only."""
+    from agents.orchestrator import _sample_primary_table
+    db = load_sample_workspace()
+    df = _sample_primary_table(db)
+    schema = profile_dataframe(df, db.table_name, suggest_questions=False)
+    schema.suggested_questions = list(SAMPLE_QUESTIONS)
+    _set_workspace(db, df, schema, "chinook")
+    st.session_state.dataset_id = None
+
+
+def _set_workspace(db, df, schema, name: str):
+    st.session_state.db = db
+    st.session_state.df = df
+    st.session_state.schema = schema
+    st.session_state.messages = []
+    st.session_state.analyses = []
+    st.session_state.agent_log = []
+    st.session_state.stream_target = None
+    st.query_params["view"] = "chat"
+    st.query_params["ds"] = name
 
 
 def rehydrate_dataset(dataset_id: str) -> bool:
@@ -138,8 +199,10 @@ def rehydrate_dataset(dataset_id: str) -> bool:
 
 
 def clear_session():
+    keep = {"user_api_key", "questions_asked", "workspace_id"}
     for k, v in _DEFAULTS.items():
-        st.session_state[k] = v if not isinstance(v, list) else []
+        if k not in keep:
+            st.session_state[k] = v if not isinstance(v, list) else []
     for p in ("view", "ds"):
         st.query_params.pop(p, None)
 
@@ -221,7 +284,7 @@ def _render_trace_panel(run_id: str):
             "model": s.get("model") or "",
         })
     df_trace = pd.DataFrame(rows)
-    st.dataframe(df_trace, use_container_width=True, hide_index=True)
+    st.dataframe(df_trace, width="stretch", hide_index=True)
     st.caption(f"run_id: `{run_id}` — trace file: `outputs/traces/`")
 
 
@@ -255,10 +318,61 @@ def _session_cost_summary() -> dict:
     }
 
 
+def _display_frame(df, sql: str = ""):
+    """Readable copy of a result: floats to 2 decimals, and a label + one
+    measure result without ORDER BY sorted by the measure (largest first)."""
+    out = df.copy()
+    num = out.select_dtypes("number").columns
+    if len(num) == 1 and len(out.columns) > 1 and "order by" not in (sql or "").lower():
+        out = out.sort_values(num[0], ascending=False, kind="stable")
+    floats = out.select_dtypes("float").columns
+    out[floats] = out[floats].round(2)
+    return out
+
+
+def _inline_table(df, sql: str = ""):
+    if df is not None and 0 < len(df) <= 50:
+        st.dataframe(_display_frame(df, sql), width="stretch", hide_index=True)
+
+
+def _render_sql_editor(analysis: dict):
+    """Show the SQL; let the user edit and re-run it through the same guard."""
+    sql = analysis["sql_query"]
+    if sql.startswith("--") or st.session_state.db is None:
+        st.code(sql, language="sql")
+        return
+    key = f"sql_{analysis.get('run_id') or id(analysis)}"
+    edited = st.text_area("SQL (editable, read-only guard applies)", sql, key=key, height=140)
+    if st.button("Run edited SQL", key=f"{key}_run"):
+        df, err = st.session_state.db.execute_query(edited)
+        if err:
+            st.error(err)
+        else:
+            st.dataframe(df, width="stretch", hide_index=True)
+
+
+def _render_feedback(analysis: dict):
+    run_id = analysis.get("run_id")
+    if not run_id:
+        return
+    rating = st.feedback("thumbs", key=f"fb_{run_id}")
+    if rating is not None and not st.session_state.get(f"fb_done_{run_id}"):
+        feedback.record(run_id, "streamlit", "up" if rating == 1 else "down", analysis.get("question", ""),
+                        analysis.get("sql_query"), st.query_params.get("ds", ""))
+        st.session_state[f"fb_done_{run_id}"] = True
+        st.toast("Thanks — feedback recorded.")
+
+
 def render_assistant_body(analysis: dict, should_stream: bool):
     """Render chart + narrative + chips + expanders inside an assistant message."""
     validation = analysis.get("validation") or {}
     conf = validation.get("confidence")
+
+    if analysis.get("declined"):
+        # Out-of-scope / write request: a plain decline, no warnings or red confidence.
+        st.info(md_safe(analysis.get("narrative", "")))
+        _render_feedback(analysis)
+        return
 
     # Narrative
     if analysis.get("narrative"):
@@ -266,16 +380,18 @@ def render_assistant_body(analysis: dict, should_stream: bool):
         if "encountered an error" in narrative_text:
             st.info("The AI narrative service was temporarily unavailable. Your data results are shown below.")
         elif should_stream:
-            st.write_stream(type_stream(narrative_text, words_per_chunk=2, delay=0.025))
+            st.write_stream(md_safe(c) for c in type_stream(narrative_text, words_per_chunk=2, delay=0.025))
         else:
-            st.markdown(narrative_text)
+            st.markdown(md_safe(narrative_text))
 
-    # Chart
+    # Chart, or the result as a table when no chart fits (e.g. 1-3 rows)
     if analysis.get("chart") is not None:
-        st.plotly_chart(analysis["chart"], use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(analysis["chart"], width="stretch", config={"displayModeBar": False})
+    else:
+        _inline_table(analysis.get("result_df"), analysis.get("sql_query") or "")
 
     if analysis.get("prediction_chart") is not None:
-        st.plotly_chart(analysis["prediction_chart"], use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(analysis["prediction_chart"], width="stretch", config={"displayModeBar": False})
 
     if analysis.get("prediction") and "explanation" in (analysis.get("prediction") or {}):
         st.info(analysis["prediction"]["explanation"])
@@ -310,6 +426,8 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             unsafe_allow_html=True,
         )
 
+    _render_feedback(analysis)
+
     # Expandable details
     with st.expander("View details", expanded=False):
         tab_names = []
@@ -324,11 +442,12 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             tab_idx = 0
             if "Data" in tab_names:
                 with tabs[tab_idx]:
-                    st.dataframe(analysis["result_df"], use_container_width=True, height=300)
+                    st.dataframe(_display_frame(analysis["result_df"], analysis.get("sql_query") or ""),
+                                 width="stretch", hide_index=True)
                 tab_idx += 1
             if "Query" in tab_names:
                 with tabs[tab_idx]:
-                    st.code(analysis["sql_query"], language="sql")
+                    _render_sql_editor(analysis)
                 tab_idx += 1
             if "Trace" in tab_names:
                 with tabs[tab_idx]:
@@ -363,24 +482,67 @@ if SHARED_ANALYSIS_ID:
 
 # --- File/image ingestion helpers ---
 
-def _handle_file_upload(uploaded_file):
-    """Process an uploaded file and initialize the database."""
-    if uploaded_file.size > MAX_UPLOAD_BYTES:
-        st.error(
-            f"File too large ({uploaded_file.size / 1024 / 1024:.1f} MB). "
-            f"Limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
-        )
-        return False
-    df = load_file(uploaded_file)
-    if len(df) > MAX_ROWS_INGEST:
-        st.warning(f"Dataset truncated to {MAX_ROWS_INGEST:,} rows (uploaded {len(df):,}).")
-        df = df.head(MAX_ROWS_INGEST)
-    table_name = uploaded_file.name.rsplit(".", 1)[0].lower().replace(" ", "_")
+def _table_name(filename: str) -> str:
+    stem = filename.rsplit(".", 1)[0].lower()
+    return "".join(ch if ch.isalnum() else "_" for ch in stem).strip("_") or "data"
+
+
+def _handle_file_upload(uploaded_files):
+    """Load one or more files; the first is the primary table, the rest are
+    extra tables the Coder can join."""
+    frames = {}
+    for f in uploaded_files:
+        ok, msg = DEMO.upload_allowed(f.size)
+        if not ok or f.size > MAX_UPLOAD_BYTES:
+            st.error(msg or f"{f.name} is too large ({f.size / 1024 / 1024:.1f} MB).")
+            return False
+        df = load_file(f)
+        if len(df) > MAX_ROWS_INGEST:
+            st.warning(f"{f.name} truncated to {MAX_ROWS_INGEST:,} rows (uploaded {len(df):,}).")
+            df = df.head(MAX_ROWS_INGEST)
+        frames[_table_name(f.name)] = df
+    primary, *rest = frames.items()
     with st.spinner("Profiling dataset..."):
-        init_database(df, table_name, original_filename=uploaded_file.name)
-    log.info("Loaded %s rows=%d cols=%d", table_name, len(df), len(df.columns))
+        init_database(primary[1], primary[0], original_filename=uploaded_files[0].name,
+                      extra_tables=dict(rest))
+    log.info("Loaded %d table(s), primary %s rows=%d", len(frames), primary[0], len(primary[1]))
     return True
 
+
+def _restore_from_url(ds: str) -> bool:
+    """A reload or reconnect starts a fresh session; reopen the dataset the URL
+    names so the user lands back in their workspace (chat history is lost)."""
+    if ds == "chinook":
+        init_sample_workspace()
+        return True
+    for name, path in _SAMPLES.items():
+        if ds == name.lower().replace(" ", "_") and os.path.exists(path):
+            init_database(pd.read_csv(path), ds, original_filename=os.path.basename(path))
+            return True
+    if PERSIST:
+        match = next((d for d in store.list_datasets(st.session_state.workspace_id) if d.name == ds), None)
+        if match and rehydrate_dataset(match.id):
+            st.query_params["view"], st.query_params["ds"] = "chat", ds
+            return True
+    return False
+
+
+if st.session_state.schema is None and _QP_VIEW == "chat" and _QP_DATASET:
+    with st.spinner("Restoring your workspace..."):
+        restored = _restore_from_url(_QP_DATASET)
+    if restored:
+        st.session_state["_restored_notice"] = True
+    else:
+        st.query_params.clear()
+
+@st.fragment(run_every=60)
+def _keepalive():
+    """Renders nothing. Its periodic rerun is server->browser traffic that keeps
+    the websocket from going idle: in QA, a question typed after ~7 idle
+    minutes was lost while the browser silently reconnected."""
+
+
+_keepalive()
 
 # --- Navigation: handle browser back button ---
 if st.session_state.schema is not None and _QP_VIEW != "chat":
@@ -401,40 +563,33 @@ if st.session_state.schema is None:
     )
 
     # Feature cards
-    f1, f2, f3 = st.columns(3, gap="medium")
-    with f1:
-        feature_card("database", "Schema profiling",
-                     "Infers column roles, distributions, and date ranges on upload.")
-    with f2:
-        feature_card("brain", "Plan, code, critique",
-                     "Planner decomposes, Coder writes SQL, Critic validates rigor.")
-    with f3:
-        feature_card("chart", "Visualize & narrate",
-                     "Picks the right chart and explains findings in plain English.")
-
-    f4, f5, f6 = st.columns(3, gap="medium")
-    with f4:
-        feature_card("predict", "Forecast & cluster",
-                     "Time-series forecasting, segmentation, and anomaly detection.")
-    with f5:
-        feature_card("shield", "Grounded by RAG",
-                     "Statistical knowledge base prevents hallucinated methods.")
-    with f6:
-        feature_card("document", "Exec-ready reports",
-                     "One click turns your session into a branded PDF deliverable.")
+    feature_grid([
+        ("database", "Schema profiling",
+         "Infers column roles, distributions, and date ranges on upload."),
+        ("brain", "Plan, code, critique",
+         "Planner decomposes, Coder writes SQL, Critic validates rigor."),
+        ("chart", "Visualize & narrate",
+         "Picks the right chart and explains findings in plain English."),
+        ("predict", "Forecast & cluster",
+         "Time-series forecasting, segmentation, and anomaly detection."),
+        ("shield", "Guarded SQL",
+         "Read-only queries behind an AST allow-list, engine guards and timeouts."),
+        ("document", "Exec-ready reports",
+         "One click turns your session into a branded PDF deliverable."),
+    ])
 
     st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
 
     # --- Quick start: sample datasets ---
-    section_label("Quick start — load a sample dataset")
+    section_label("Quick start — try a sample")
+    if st.button("Chinook music store — 11 related tables (joins)", key="qs_chinook",
+                 width="stretch", type="primary"):
+        with st.spinner("Opening sample database..."):
+            init_sample_workspace()
+        st.rerun()
     qs1, qs2, qs3 = st.columns(3, gap="medium")
-    _samples = {
-        "E-Commerce Transactions": "data/ecommerce_transactions.csv",
-        "Superstore Sales": "data/superstore_sales.csv",
-        "Employee Data": "data/employee_data.csv",
-    }
-    for col, (name, path) in zip([qs1, qs2, qs3], _samples.items()):
-        if col.button(name, key=f"qs_{name}", use_container_width=True, type="primary"):
+    for col, (name, path) in zip([qs1, qs2, qs3], _SAMPLES.items()):
+        if col.button(name, key=f"qs_{name}", width="stretch"):
             if os.path.exists(path):
                 with st.spinner("Loading & profiling..."):
                     _df = pd.read_csv(path)
@@ -445,16 +600,19 @@ if st.session_state.schema is None:
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
     # --- Upload your own ---
-    section_label("Or upload your own file")
-    landing_file = st.file_uploader(
-        "Upload CSV or Excel",
+    section_label("Or upload your own files")
+    landing_files = st.file_uploader(
+        "Upload CSV or Excel — several files become related tables you can join",
         type=["csv", "xlsx", "xls"],
-        label_visibility="collapsed",
+        accept_multiple_files=True,
         key="landing_upload",
     )
-    if landing_file is not None:
+    # The server accepts up to 25 MB so an oversized file reaches our own check,
+    # which shows a visible error (Streamlit's own rejection is a hover tooltip).
+    st.caption(f"Up to {DEMO.max_upload_mb if DEMO.enabled else MAX_UPLOAD_BYTES // 2**20} MB per file · CSV, XLSX, XLS")
+    if landing_files:
         try:
-            if _handle_file_upload(landing_file):
+            if _handle_file_upload(landing_files):
                 st.rerun()
         except Exception as e:
             st.error(f"Couldn't read that file — {e}")
@@ -469,7 +627,7 @@ if st.session_state.schema is None:
             help="Upload a photo of a table — Gemini will OCR it",
         )
         if landing_image is not None:
-            st.image(landing_image, use_container_width=True)
+            st.image(landing_image, width="stretch")
             with st.spinner("Extracting table from image..."):
                 image_bytes = landing_image.read()
                 mime = f"image/{landing_image.name.rsplit('.', 1)[-1].lower()}"
@@ -481,13 +639,13 @@ if st.session_state.schema is None:
             elif csv_string:
                 df = parse_csv_string(csv_string)
                 if df is not None:
-                    edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
+                    edited_df = st.data_editor(df, width="stretch", num_rows="dynamic")
                     if st.button("Use this data", type="primary"):
                         init_database(edited_df, "image_data", original_filename="image_extract")
                         st.rerun()
 
     # --- Previously loaded datasets ---
-    _library = store.list_datasets(st.session_state.workspace_id)
+    _library = store.list_datasets(st.session_state.workspace_id) if PERSIST else []
     if _library:
         st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
         section_label("Recent datasets")
@@ -497,7 +655,7 @@ if st.session_state.schema is None:
                 if st.button(
                     f"{ds.name.replace('_', ' ').title()}",
                     key=f"lib_{ds.id}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     with st.spinner("Loading dataset..."):
                         rehydrate_dataset(ds.id)
@@ -511,19 +669,21 @@ if st.session_state.schema is None:
 else:
     schema = st.session_state.schema
 
-    nav_l, nav_c, nav_r = st.columns([1, 5, 1])
-    if nav_l.button("< Back", key="nav_back", use_container_width=True):
+    nav_l, nav_c, nav_r = st.columns([1.2, 4, 1.2])
+    if nav_l.button("< Back", key="nav_back", width="stretch"):
         clear_session()
         st.rerun()
+    _n_tables = len(st.session_state.db.datasource().tables)
+    _title = (st.query_params.get("ds") or schema.table_name).replace("_", " ").title()
+    _sub = (f"{_n_tables} tables" if _n_tables > 1
+            else f"{schema.row_count:,} rows · {schema.column_count} cols")
     nav_c.markdown(
-        f'<div style="text-align:center;padding-top:0.25rem;">'
-        f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">'
-        f'{schema.table_name.replace("_", " ").title()}</span>'
-        f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">'
-        f'{schema.row_count:,} rows · {schema.column_count} cols</span></div>',
+        f'<div class="da-nav-title" style="text-align:center;padding-top:0.25rem;">'
+        f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">{_title}</span>'
+        f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">{_sub}</span></div>',
         unsafe_allow_html=True,
     )
-    if nav_r.button("New chat", key="nav_new", use_container_width=True):
+    if nav_r.button("New chat", key="nav_new", width="stretch"):
         st.session_state.messages = []
         st.session_state.analyses = []
         st.session_state.agent_log = []
@@ -531,8 +691,38 @@ else:
 
     # --- Dataset overview (collapsed) ---
     with st.expander("Dataset overview", expanded=False):
-        render_profile(schema)
-        st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), use_container_width=True)
+        _tables = st.session_state.db.datasource().tables
+        if len(_tables) > 1:
+            st.caption("Questions can join across these tables.")
+            st.dataframe(
+                pd.DataFrame([{"table": t.name, "rows": f"{t.row_count:,}", "columns": len(t.columns),
+                               "links to": ", ".join(sorted({fk.ref_table for fk in t.foreign_keys}))}
+                              for t in _tables]),
+                width="stretch", hide_index=True,
+            )
+        else:
+            render_profile(schema)
+            st.dataframe(st.session_state.df.head(MAX_DISPLAY_ROWS), width="stretch")
+
+    # --- Report export (above the chat so the fixed input bar can't cover it) ---
+    export_slot = st.container()
+    if st.session_state.analyses:
+        col_a, col_b, _ = export_slot.columns([1, 1, 2])
+        report_clicked = col_a.button("Export PDF report", width="stretch")
+        md_clicked = col_b.button("Export Markdown", width="stretch")
+    else:
+        report_clicked = md_clicked = False
+
+    if st.session_state.pop("_restored_notice", False) and not st.session_state.messages:
+        st.info("Reopened your dataset after the page reloaded. Earlier answers in this chat were cleared.")
+
+    # --- Bring your own key (public demo) ---
+    if DEMO.enabled:
+        with st.expander("Use your own Gemini API key (no question limit)", expanded=False):
+            st.session_state.user_api_key = st.text_input(
+                "Gemini API key", value=st.session_state.user_api_key, type="password",
+                help="Used only for your session; never stored. Free at aistudio.google.com/apikey.",
+            )
 
     # --- Session info bar ---
     _cost = _session_cost_summary()
@@ -557,14 +747,14 @@ else:
         st.markdown('<div class="da-suggest-anchor"></div>', unsafe_allow_html=True)
         cols = st.columns(3, gap="medium")
         for i, q in enumerate(schema.suggested_questions[:6]):
-            if cols[i % 3].button(q, key=f"sq_{i}", use_container_width=True):
+            if cols[i % 3].button(q, key=f"sq_{i}", width="stretch"):
                 st.session_state["_pending_q"] = q
                 st.rerun()
 
     # --- Chat history ---
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "user":
-            with st.chat_message("user"):
+            with st.chat_message("user", avatar=":material/person:"):
                 st.markdown(msg["content"])
         else:
             with st.chat_message("assistant"):
@@ -583,18 +773,26 @@ else:
     if pending and not prompt:
         prompt = pending
 
-    # --- Action row: report export ---
-    with st.container():
-        col_a, col_b, col_c = st.columns([1, 1, 2])
-        report_clicked = col_a.button("Export PDF report", use_container_width=True,
-                                       disabled=not st.session_state.analyses)
-        md_clicked = col_b.button("Export Markdown", use_container_width=True,
-                                   disabled=not st.session_state.analyses)
-
     # --- Handle new chat turn ---
+    _vkey = _visitor_key()
+    _used = max(st.session_state.questions_asked, _visitor_budget().used(_vkey) if _vkey else 0)
+    allowed, limit_msg = DEMO.question_allowed(_used, st.session_state.user_api_key)
+    if prompt and not allowed:
+        st.warning(limit_msg)
+        prompt = None
+
     if prompt:
         log.info("User: %s", prompt[:80])
         st.session_state.messages.append({"role": "user", "content": prompt})
+        if not st.session_state.user_api_key:
+            st.session_state.questions_asked += 1
+            if _vkey:
+                _visitor_budget().charge(_vkey)
+        # Show the question right away, not only after the 20-40 s run.
+        with st.chat_message("user", avatar=":material/person:"):
+            st.markdown(prompt)
+        key_scope = api_key_override(st.session_state.user_api_key)
+        key_scope.__enter__()
         try:
             contextual_q = contextualize(prompt, st.session_state.messages)
 
@@ -637,7 +835,10 @@ else:
             with st.chat_message("assistant"):
                 if not has_data or val_status == "rejected":
                     error_msg = result.get("error") or ""
-                    if "QuotaExhausted" in error_msg:
+                    if error_msg.startswith("OutOfScope"):
+                        narrative = ("I can't answer that from this data: "
+                                     + error_msg.split(":", 1)[1].strip())
+                    elif "QuotaExhausted" in error_msg:
                         narrative = "The AI service quota has been exceeded. Please try again later."
                     elif not has_data:
                         narrative = (
@@ -651,9 +852,10 @@ else:
                             "validation agent (confidence too low). The results "
                             "may be inaccurate — consider rephrasing the question."
                         )
-                    st.warning(narrative)
+                    (st.info if error_msg.startswith("OutOfScope") else st.warning)(narrative)
                 else:
-                    result_summary = result_df.head(20).to_string()
+                    result_summary = storyteller_agent.summarize_result(
+                        result_df, pii.detect(st.session_state.db.datasource()))
                     narrative_stream = storyteller_agent.stream_narrative(
                         question=contextual_q,
                         sql_query=result.get("sql_query", "") or "",
@@ -681,13 +883,17 @@ else:
                     else:
                         # Stream remaining chunks with the buffered ones prepended
                         import itertools
-                        narrative = st.write_stream(itertools.chain(first_chunks, narrative_stream))
+                        raw: list = []
+                        st.write_stream(_escaped(itertools.chain(first_chunks, narrative_stream), raw))
+                        narrative = "".join(raw)
 
                 # Show chart inline on first render
                 if result.get("chart") is not None:
-                    st.plotly_chart(result["chart"], use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(result["chart"], width="stretch", config={"displayModeBar": False})
+                elif has_data and val_status != "rejected":
+                    _inline_table(result_df, result.get("sql_query") or "")
                 if result.get("prediction_chart") is not None:
-                    st.plotly_chart(result["prediction_chart"], use_container_width=True, config={"displayModeBar": False})
+                    st.plotly_chart(result["prediction_chart"], width="stretch", config={"displayModeBar": False})
 
             analysis = {
                 "question": prompt,
@@ -699,10 +905,11 @@ else:
                 "narrative": narrative or "",
                 "validation": result.get("validation"),
                 "error": result.get("error"),
+                "declined": (result.get("error") or "").startswith("OutOfScope"),
                 "run_id": result.get("run_id"),
             }
             analysis_id = None
-            if st.session_state.dataset_id:
+            if st.session_state.dataset_id and PERSIST:
                 try:
                     analysis_id = store.save_analysis(
                         workspace_id=st.session_state.workspace_id,
@@ -726,9 +933,8 @@ else:
             err_str = str(e)
             if any(p in err_str for p in ("429", "RESOURCE_EXHAUSTED", "quota", "rate limit")):
                 user_error = (
-                    "The AI service quota has been exceeded. The free tier allows "
-                    "a limited number of requests per minute/day. Please wait a "
-                    "moment and try again, or upgrade your Gemini API plan."
+                    "The AI service is rate-limiting requests right now. Please wait "
+                    "a moment and try again."
                 )
             else:
                 user_error = f"The agent crew hit an error. Try rephrasing your question."
@@ -738,11 +944,13 @@ else:
                 "question": prompt,
                 "error": user_error,
             })
+        finally:
+            key_scope.__exit__(None, None, None)
         st.rerun()
 
     # --- Report export handlers ---
     if (report_clicked or md_clicked) and st.session_state.analyses:
-        with st.spinner("Assembling report..."):
+        with export_slot, st.spinner("Assembling report..."):
             try:
                 schema_summary = json.dumps(schema.model_dump(), indent=2, default=str)
                 session_data = {

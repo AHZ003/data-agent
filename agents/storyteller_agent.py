@@ -42,7 +42,7 @@ ANALYSIS CONTEXT:
 Write the narrative now. Lead with the key finding, include specific numbers, and end with an actionable takeaway."""
 
 
-def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
+def summarize_result(df, pii_report=None, max_rows: int = 50) -> str:
     """The result table as the Storyteller may see it.
 
     PII columns are masked, instruction-like cells neutralized, and in
@@ -59,7 +59,12 @@ def summarize_result(df, pii_report=None, max_rows: int = 20) -> str:
     safe = injection.sanitize_frame(df.head(max_rows))
     if pii_report is not None:
         safe = pii.mask_frame(safe, pii_report)
-    return safe.to_string()
+    text = safe.to_string()
+    if len(df) > max_rows:
+        # The narrative once said "19 countries" for a 25-row result it only saw 20 of;
+        # 50 rows covers one row per group for typical "by country/genre" questions.
+        text += f"\n(showing the first {max_rows} of {len(df):,} rows; the full result has {len(df):,} rows)"
+    return text
 
 
 def generate_narrative(
@@ -76,7 +81,7 @@ def generate_narrative(
         chart_description, validation_warnings, prediction_info,
     )
     return llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
-                        max_output_tokens=512).strip()
+                        max_output_tokens=llm.OUTPUT_BUDGET).strip()
 
 
 def stream_narrative(
@@ -99,7 +104,7 @@ def stream_narrative(
     )
     try:
         yield from llm.generate_stream(prompt, model=model_for("storyteller"), temperature=0.3,
-                                       max_output_tokens=1024)
+                                       max_output_tokens=llm.OUTPUT_BUDGET)
     except Exception as e:
         yield f"\n\n_Narrative generation encountered an error: {e}_"
 
@@ -161,7 +166,7 @@ Return ONLY the JSON:"""
 
     try:
         text = llm.generate(prompt, model=model_for("storyteller"), temperature=0.3,
-                            max_output_tokens=2048).strip()
+                            max_output_tokens=llm.OUTPUT_BUDGET).strip()
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
             if match:

@@ -1,7 +1,6 @@
 # Most text-to-SQL "improvements" are noise
 
-_Draft. Sections marked **[results pending]** need the ablation runs; every
-other number here is computed by code in this repo._
+_Draft. Every number here is computed by code in this repo; DataAgent results are from Gemini 3.8 Flash on 200-question stratified subsets._
 
 You change a prompt, rerun your eval on 200 questions, and accuracy goes from
 71% to 73%. Did the change help?
@@ -58,11 +57,28 @@ eval can reliably see it. On the full Spider dev set, ~3 points is the floor.
    `NULL` into `NaN`, and `NaN != None`, so any answer containing a NULL could
    never match. That bug would have silently depressed every score.
 
-## Results on DataAgent **[results pending]**
+## Results on DataAgent
 
-- Self-repair loop on vs off, Spider dev subset: Δ = __ pts [__, __], McNemar p = __.
-- Each retrieval component on BIRD: Δ, CI, p.
-- How many of our "improvements" survive the paired test: __ of __.
+Eight comparisons, each a plausible "improvement" someone would ship:
+
+| Change | Δ accuracy | 95% CI | McNemar p |
+|---|---|---|---|
+| Self-repair loop (Spider) | +0.5 | −1.0, +2.5 | 1.0 |
+| Self-repair loop (BIRD) | +0.0 | −3.0, +3.0 | 1.0 |
+| Value hints (BIRD) | +1.0 | −1.5, +4.0 | 0.73 |
+| Schema linking (BIRD) | −1.0 | −4.5, +2.5 | 0.79 |
+| Few-shot memory (BIRD) | +0.0 | −2.5, +2.5 | 1.0 |
+| All retrieval combined (BIRD) | +3.5 | −0.5, +7.5 | 0.14 |
+| Gemini 3.1 Pro instead of 3.8 Flash (Spider) | +2.0 | −1.5, +5.5 | 0.42 |
+| BIRD evidence hints removed | **−17.5** | −23.5, −11.5 | **8×10⁻⁸** |
+
+Read naively, several of these are headlines ("all retrieval combined adds 3.5
+points!", "Pro beats Flash by 2!"). None of the first seven survives the paired
+test. The one that does — taking away
+BIRD's domain hints — is a 17-point effect, the size this eval can actually see.
+The self-repair loop, a staple of agent demos, costs 6% more per question and
+does nothing measurable here: modern models' SQL almost always runs; their
+mistakes are queries that run and return the wrong thing.
 
 ## Reproduce
 

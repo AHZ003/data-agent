@@ -63,6 +63,7 @@ class ExampleResult:
     tokens_out: int = 0
     cost_usd: float = 0.0
     latency_s: float = 0.0
+    truncated: int = 0
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExampleResult":
@@ -251,7 +252,7 @@ def run_example(ex: Example, db_path: Path, cfg: RunConfig, rule: str) -> Exampl
         gold_sql=ex.gold_sql, pred_sql=code.sql_query or "", match=match,
         error=None if code.success else code.error, gold_error=gold_error,
         attempts=code.attempts, tokens_in=usage.tokens_in, tokens_out=usage.tokens_out,
-        cost_usd=usage.cost_usd, latency_s=round(latency, 3),
+        cost_usd=usage.cost_usd, latency_s=round(latency, 3), truncated=usage.truncated,
     )
 
 
@@ -286,7 +287,7 @@ def run_examples(
     Examples whose result is a terminal provider error (quota, bad key)
     are not cached, so a rerun retries them.
     """
-    from agents.coder_agent import is_terminal_error
+    from agents.coder_agent import PROVIDER_SENTINEL, is_terminal_error
 
     examples = list(examples)
     path = cache_path(cfg, cache_dir) if cache_dir else None
@@ -301,7 +302,14 @@ def run_examples(
         path.parent.mkdir(parents=True, exist_ok=True)
 
     def _one(ex: Example) -> ExampleResult:
-        r = run_example(ex, db_path_for(ex), cfg, rule)
+        try:
+            r = run_example(ex, db_path_for(ex), cfg, rule)
+        except Exception as e:
+            # One failing question must not abort the run. Recorded as a
+            # provider error (not cached), so a rerun retries it.
+            r = ExampleResult(id=ex.id, db_id=ex.db_id, difficulty=ex.difficulty, question=ex.question,
+                              gold_sql=ex.gold_sql, pred_sql="", match=False,
+                              error=f"{PROVIDER_SENTINEL}: {type(e).__name__}: {str(e)[:200]}")
         with lock:
             done[ex.id] = r
             if path and not (r.error and is_terminal_error(r.error)):
@@ -368,6 +376,7 @@ def summarize(results: list[ExampleResult], cfg: RunConfig) -> dict:
         "by_difficulty": by_diff,
         "n_error": sum(1 for r in results if r.error),
         "n_gold_error": sum(1 for r in results if r.gold_error),
+        "n_truncated": sum(1 for r in results if r.truncated),
         "mean_attempts": sum(r.attempts for r in results) / n,
         "repaired": sum(1 for r in results if r.match and r.attempts > 1),
         "cost_usd_total": round(sum(r.cost_usd for r in results), 4),
@@ -387,7 +396,8 @@ def render_report(title: str, results: list[ExampleResult], summary: dict) -> st
         "",
         f"**Execution accuracy:** {summary['ex']:.1%} (95% CI {lo:.1%}–{hi:.1%}), n={summary['n']}",
         "",
-        f"- Errors (no executable SQL): {summary['n_error']} · gold SQL errors: {summary['n_gold_error']}",
+        f"- Errors (no executable SQL): {summary['n_error']} · gold SQL errors: {summary['n_gold_error']} · "
+        f"truncated LLM outputs: {summary.get('n_truncated', 0)}",
         f"- Fixed by self-repair: {summary['repaired']} · mean attempts: {summary['mean_attempts']:.2f}",
         f"- Cost: ${summary['cost_usd_total']:.4f} total, ${summary['cost_usd_mean']:.5f}/question",
         f"- Latency: p50 {summary['latency_s']['p50']:.1f}s, p95 {summary['latency_s']['p95']:.1f}s",

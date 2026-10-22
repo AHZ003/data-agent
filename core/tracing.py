@@ -29,14 +29,24 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-# Gemini 2.0 / 2.5 Flash pricing as of 2026. Adjust when Google changes
-# the rate card. Values are USD per 1M tokens.
+# Paid-tier list prices, USD per 1M tokens (<=200k context), from
+# https://ai.google.dev/gemini-api/docs/pricing as of 2026-09-28. Thinking
+# tokens are billed as output. Update this table when Google changes it.
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemini-2.0-flash":      {"in": 0.10, "out": 0.40},
-    "gemini-2.0-flash-exp":  {"in": 0.10, "out": 0.40},
-    "gemini-2.5-flash":      {"in": 0.15, "out": 0.60},
-    "gemini-2.5-pro":        {"in": 1.25, "out": 5.00},
-    "default":               {"in": 0.15, "out": 0.60},
+    # 3.6-3.8 Flash prices hold through 2026-12-31 and rise on 2027-01-01.
+    "gemini-3.8-flash":      {"in": 0.75, "out": 3.75},
+    "gemini-3.7-flash":      {"in": 0.75, "out": 3.75},
+    "gemini-3.6-flash":      {"in": 0.75, "out": 3.75},
+    "gemini-2.5-flash-lite": {"in": 0.10, "out": 0.40},
+    "gemini-2.5-flash":      {"in": 0.30, "out": 2.50},
+    "gemini-2.5-pro":        {"in": 1.25, "out": 10.00},
+    "gemini-3.1-flash-lite": {"in": 0.25, "out": 1.50},
+    "gemini-3.5-flash-lite": {"in": 0.30, "out": 2.50},
+    "gemini-3.5-flash":      {"in": 1.50, "out": 9.00},
+    "gemini-3.1-pro-preview": {"in": 2.00, "out": 12.00},
+    # 2.5 models are closed to new projects; kept for older traces.
+    # Unknown models are priced like the default model, never as free.
+    "default":               {"in": 0.75, "out": 3.75},
 }
 
 
@@ -178,7 +188,7 @@ def span(
     """Context manager wrapping an agent step. Auto-emits a Span on exit.
 
     Usage:
-        with tracing.span("coder", model="gemini-2.5-flash") as s:
+        with tracing.span("coder", model="gemini-3.8-flash") as s:
             result = do_work()
             s.set_tokens(in_=123, out_=456)
             s.add_metadata(sql=result.sql[:200])
@@ -263,6 +273,7 @@ class Usage:
     tokens_in: int = 0
     tokens_out: int = 0
     cost_usd: float = 0.0
+    truncated: int = 0
 
 
 @contextmanager
@@ -282,6 +293,15 @@ def usage_scope():
         yield usage
     finally:
         stack.remove(usage)
+
+
+def mark_truncated() -> None:
+    """Flag the open span and scopes: an LLM answer hit the output limit."""
+    stack = _span_stack()
+    if stack:
+        stack[-1].add_metadata(truncated=True)
+    for usage in _scope_stack():
+        usage.truncated += 1
 
 
 def record_usage(response: Any, model: Optional[str] = None, usd: Optional[float] = None) -> None:

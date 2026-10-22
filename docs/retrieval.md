@@ -68,5 +68,20 @@ What this says:
   above are unpaired, so the paired test on the end-to-end ablation is the one
   to cite.
 
-End-to-end EX lift per component: pending the ablation run
-(`python -m benchmarks.ablate --only bird-flash-values,bird-flash-schema30,...`).
+## End-to-end results on BIRD (2026-10-21)
+
+Gemini 3.8 Flash, evidence hints on, repair mode, same 200 questions, paired vs
+no retrieval (72.5%):
+
+| Config | EX | Δ (95% CI) | McNemar p | discordant (base/this) |
+|---|---|---|---|---|
+| Value hints | 73.5% | +1.0 (−1.5, +4.0) | 0.73 | 3/5 |
+| Schema linking, k=30 | 71.5% | −1.0 (−4.5, +2.5) | 0.79 | 8/6 |
+| Schema linking + values | 72.0% | −0.5 (−4.0, +2.5) | 1.0 | 6/5 |
+| Query memory (3 few-shot, Spider train) | 72.5% | 0.0 (−2.5, +2.5) | 1.0 | 3/3 |
+| All combined | **76.0%** | **+3.5 (−0.5, +7.5)** | 0.14 | 5/12 |
+
+No single component moves accuracy measurably; together they are the best
+configuration, but the gain is not significant at n=200. Pruning saved almost
+no cost because the rendered BIRD schemas are only ~2k tokens. Next test: the
+full 500-question set roughly doubles the power for the combined config.

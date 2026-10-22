@@ -10,7 +10,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # --- Model Configuration ---
 # Override via DATAAGENT_MODEL env var for cross-model eval comparisons.
-MODEL_NAME = os.getenv("DATAAGENT_MODEL", "gemini-2.5-flash")
+MODEL_NAME = os.getenv("DATAAGENT_MODEL", "gemini-3.8-flash")
 
 
 def model_for(agent: str) -> str:

@@ -16,7 +16,7 @@ import pandas as pd
 
 from config import MODEL_NAME
 from core import tracing
-from core.llm import current_api_key
+from core import llm
 
 
 @dataclass
@@ -247,7 +247,7 @@ def score_narrative_faithfulness(
         from google import genai
         from google.genai import types as genai_types
 
-        client = genai.Client(api_key=current_api_key())
+        client = llm.client()
         prompt = _JUDGE_PROMPT.format(
             question=question,
             result=result_df.head(10).to_string(),
@@ -256,7 +256,7 @@ def score_narrative_faithfulness(
         resp = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
-            config=genai_types.GenerateContentConfig(temperature=0.0, max_output_tokens=200),
+            config=genai_types.GenerateContentConfig(temperature=0.0, max_output_tokens=llm.OUTPUT_BUDGET),
         )
         tracing.record_usage(resp, MODEL_NAME)
         text = resp.text.strip()

@@ -49,7 +49,7 @@ Return ONLY the JSON object:"""
 
     try:
         text = llm.generate(prompt, model=model_for("planner"), temperature=0.0,
-                            max_output_tokens=1024).strip()
+                            max_output_tokens=llm.OUTPUT_BUDGET).strip()
     except Exception:
         return _fallback_plan(question)
 

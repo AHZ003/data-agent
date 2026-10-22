@@ -12,7 +12,7 @@ Usage:
     python -m benchmarks.spider_eval --subset 200 --seed 0   # stratified by difficulty
     python -m benchmarks.spider_eval --mode single           # no self-repair
     python -m benchmarks.spider_eval --difficulty hard --concurrency 4
-    python -m benchmarks.spider_eval --model gemini-2.5-pro
+    python -m benchmarks.spider_eval --model gemini-3.1-pro-preview
     python -m benchmarks.spider_eval --oracle                # harness self-check, no LLM
 
 Outputs (default outputs/spider/): results.json, summary.json, report.md.

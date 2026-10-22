@@ -82,3 +82,58 @@ if __name__ == "__main__":
     test_clustering()
     print("✓ test_clustering passed")
     print("\nAll end-to-end tests passed!")
+
+
+# ── Regressions from the first live deploy ───────────────────────────────
+
+def test_kpi_keeps_the_winning_label():
+    df = pd.DataFrame({"Region": ["Central"], "total_sales": [168556.36]})
+    config = get_chart_config(df, "Which region has the highest total sales?")
+    assert config.chart_type == ChartType.KPI_CARD and config.x_column == "Region"
+    fig = generate_chart(df, "Which region has the highest total sales?", config)
+    assert "Central" in fig.data[0].title.text
+
+
+def test_measures_on_different_scales_get_separate_panels():
+    df = pd.DataFrame({
+        "Segment": ["Consumer"] * 3 + ["Corporate"] * 3,
+        "Category": ["Furniture", "Office", "Tech"] * 2,
+        "total_sales": [77623.0, 60000.0, 73577.0, 70000.0, 65000.0, 72000.0],
+        "avg_profit": [38.9, 20.1, 59.5, 58.3, 25.0, 56.0],
+        "total_quantity": [1500, 4000, 1700, 1600, 3900, 1713],
+    })
+    q = "Breakdown of total sales, average profit and quantity by segment and category"
+    config = get_chart_config(df, q)
+    assert config.chart_type == ChartType.SMALL_MULTIPLES
+    fig = generate_chart(df, q, config)
+    assert len(fig.data) == 3                       # one panel per measure
+    assert list(fig.data[0].x)[0] == "Consumer · Furniture"  # both dimensions on x
+
+
+def test_long_titles_wrap():
+    df = pd.DataFrame({"Category": list("ABCDE"), "Revenue": [1, 2, 3, 4, 5]})
+    q = "What is the breakdown of total sales across each customer segment and product category over time?"
+    fig = generate_chart(df, q)
+    assert "<br>" in fig.layout.title.text
+
+
+# ── Second QA pass ───────────────────────────────────────────────────────
+
+def test_horizontal_bar_has_measure_on_x():
+    df = pd.DataFrame({"Genre": [f"g{i}" for i in range(10)], "sales": range(10, 20)})
+    config = get_chart_config(df, "sales by genre")
+    assert config.chart_type == ChartType.HORIZONTAL_BAR
+    fig = generate_chart(df, "sales by genre", config)
+    assert list(fig.data[0].x) == list(range(10, 20)) and fig.data[0].orientation == "h"
+
+
+def test_year_axis_is_categorical():
+    df = pd.DataFrame({"year": ["2009", "2010", "2011", "2012", "2013"], "rev": [449.5, 481.5, 469.6, 477.5, 450.6]})
+    fig = generate_chart(df, "revenue by year")
+    assert fig.layout.xaxis.type == "category"
+
+
+def test_kpi_number_has_thousands_separator():
+    df = pd.DataFrame({"n": [1519]})
+    fig = generate_chart(df, "How many tracks have never been purchased?")
+    assert fig.data[0].number.valueformat == ",.0f"

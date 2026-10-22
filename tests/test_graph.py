@@ -57,3 +57,14 @@ def test_api_docs_match_the_app():
         capture_output=True, text=True,
     )
     assert result.returncode == 0, "docs/api.md is stale; run scripts/export_api_docs.py"
+
+
+def test_storyteller_survives_runs_with_no_result(monkeypatch):
+    """Regression: a refused/failed query left chart_config=None and the
+    storyteller crashed calling .get on it."""
+    from agents import storyteller_agent
+    monkeypatch.setattr(storyteller_agent, "generate_narrative", lambda **k: "No data was returned.")
+    state = _state()
+    state.update(result_df=None, chart_config=None, validation=None, plan=None, sql_query="")
+    out = orchestrator.storyteller_node(state)
+    assert out["narrative"] == "No data was returned."

@@ -89,7 +89,7 @@ def test_storyteller_generate_narrative_via_cassette(tmp_path, monkeypatch):
     monkeypatch.setattr(
         llm.genai,
         "Client",
-        lambda api_key=None: llm_cassette.make_replay_client("storyteller_topregion"),
+        lambda api_key=None, **kw: llm_cassette.make_replay_client("storyteller_topregion"),
     )
 
     out = storyteller_agent.generate_narrative(
@@ -119,7 +119,7 @@ def test_storyteller_stream_narrative_via_cassette(tmp_path, monkeypatch):
     monkeypatch.setattr(
         llm.genai,
         "Client",
-        lambda api_key=None: llm_cassette.make_replay_client("storyteller_stream"),
+        lambda api_key=None, **kw: llm_cassette.make_replay_client("storyteller_stream"),
     )
 
     chunks = list(storyteller_agent.stream_narrative(
