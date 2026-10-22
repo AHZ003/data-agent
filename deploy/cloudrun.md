@@ -50,7 +50,7 @@ gcloud run deploy dataagent --source . --region $REGION \
   --allow-unauthenticated \
   --max-instances 1 --min-instances 0 --memory 2Gi --cpu 1 --timeout 3600 --session-affinity \
   --set-secrets GOOGLE_API_KEY=gemini-api-key:latest \
-  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10,STREAMLIT_SERVER_MAX_UPLOAD_SIZE=10
+  --set-env-vars DEMO_MODE=1,DEMO_MAX_QUESTIONS_PER_SESSION=10,DEMO_MAX_UPLOAD_MB=10,STREAMLIT_SERVER_MAX_UPLOAD_SIZE=25
 ```
 
 The command prints the service URL. Open it and ask three sample questions.

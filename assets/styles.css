@@ -697,3 +697,6 @@ hr {
     font-size: 1.9rem !important;
   }
 }
+
+/* The real per-file limit is shown in a caption under the landing uploader. */
+[data-testid="stFileUploaderDropzoneInstructions"] small { display: none; }

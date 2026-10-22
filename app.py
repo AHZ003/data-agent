@@ -318,9 +318,21 @@ def _session_cost_summary() -> dict:
     }
 
 
-def _inline_table(df):
+def _display_frame(df, sql: str = ""):
+    """Readable copy of a result: floats to 2 decimals, and a label + one
+    measure result without ORDER BY sorted by the measure (largest first)."""
+    out = df.copy()
+    num = out.select_dtypes("number").columns
+    if len(num) == 1 and len(out.columns) > 1 and "order by" not in (sql or "").lower():
+        out = out.sort_values(num[0], ascending=False, kind="stable")
+    floats = out.select_dtypes("float").columns
+    out[floats] = out[floats].round(2)
+    return out
+
+
+def _inline_table(df, sql: str = ""):
     if df is not None and 0 < len(df) <= 50:
-        st.dataframe(df, width="stretch", hide_index=True)
+        st.dataframe(_display_frame(df, sql), width="stretch", hide_index=True)
 
 
 def _render_sql_editor(analysis: dict):
@@ -356,6 +368,12 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     validation = analysis.get("validation") or {}
     conf = validation.get("confidence")
 
+    if analysis.get("declined"):
+        # Out-of-scope / write request: a plain decline, no warnings or red confidence.
+        st.info(md_safe(analysis.get("narrative", "")))
+        _render_feedback(analysis)
+        return
+
     # Narrative
     if analysis.get("narrative"):
         narrative_text = analysis["narrative"]
@@ -370,7 +388,7 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     if analysis.get("chart") is not None:
         st.plotly_chart(analysis["chart"], width="stretch", config={"displayModeBar": False})
     else:
-        _inline_table(analysis.get("result_df"))
+        _inline_table(analysis.get("result_df"), analysis.get("sql_query") or "")
 
     if analysis.get("prediction_chart") is not None:
         st.plotly_chart(analysis["prediction_chart"], width="stretch", config={"displayModeBar": False})
@@ -424,7 +442,8 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             tab_idx = 0
             if "Data" in tab_names:
                 with tabs[tab_idx]:
-                    st.dataframe(analysis["result_df"], width="stretch", hide_index=True)
+                    st.dataframe(_display_frame(analysis["result_df"], analysis.get("sql_query") or ""),
+                                 width="stretch", hide_index=True)
                 tab_idx += 1
             if "Query" in tab_names:
                 with tabs[tab_idx]:
@@ -595,6 +614,9 @@ if st.session_state.schema is None:
         accept_multiple_files=True,
         key="landing_upload",
     )
+    # The server accepts up to 25 MB so an oversized file reaches our own check,
+    # which shows a visible error (Streamlit's own rejection is a hover tooltip).
+    st.caption(f"Up to {DEMO.max_upload_mb if DEMO.enabled else MAX_UPLOAD_BYTES // 2**20} MB per file · CSV, XLSX, XLS")
     if landing_files:
         try:
             if _handle_file_upload(landing_files):
@@ -773,6 +795,9 @@ else:
             st.session_state.questions_asked += 1
             if _vkey:
                 _visitor_budget().charge(_vkey)
+        # Show the question right away, not only after the 20-40 s run.
+        with st.chat_message("user", avatar=":material/person:"):
+            st.markdown(prompt)
         key_scope = api_key_override(st.session_state.user_api_key)
         key_scope.__enter__()
         try:
@@ -873,7 +898,7 @@ else:
                 if result.get("chart") is not None:
                     st.plotly_chart(result["chart"], width="stretch", config={"displayModeBar": False})
                 elif has_data and val_status != "rejected":
-                    _inline_table(result_df)
+                    _inline_table(result_df, result.get("sql_query") or "")
                 if result.get("prediction_chart") is not None:
                     st.plotly_chart(result["prediction_chart"], width="stretch", config={"displayModeBar": False})
 
@@ -887,6 +912,7 @@ else:
                 "narrative": narrative or "",
                 "validation": result.get("validation"),
                 "error": result.get("error"),
+                "declined": (result.get("error") or "").startswith("OutOfScope"),
                 "run_id": result.get("run_id"),
             }
             analysis_id = None

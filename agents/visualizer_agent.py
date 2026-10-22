@@ -1,5 +1,7 @@
 """Visualizer Agent - Chart selection and generation using Plotly."""
 
+import re
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -7,6 +9,9 @@ from typing import Optional
 
 from models.chart_config import ChartType, ChartConfig
 from assets.plotly_theme import register as _register_plotly_theme
+
+# Measure names that are money; KPI cards get a "$" prefix.
+_MONEY = re.compile(r"revenue|sales|amount|price|cost|spend|profit|income|payment|salary", re.I)
 
 _register_plotly_theme()
 
@@ -175,8 +180,11 @@ def generate_chart(
                        if label else title)
             v = float(value)
             fmt = ",.0f" if v.is_integer() else ",.2f"   # "1,519", "138.60"
+            measure = str(config.y_column or df.columns[0])
+            prefix = "$" if _MONEY.search(measure) else ""   # "$168,556.36"
             fig = go.Figure(
-                go.Indicator(mode="number", value=v, number={"valueformat": fmt}, title={"text": heading})
+                go.Indicator(mode="number", value=v, number={"valueformat": fmt, "prefix": prefix},
+                             title={"text": heading})
             )
             fig.update_layout(template=template, height=230, margin=dict(t=70, b=10))
             return fig
