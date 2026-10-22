@@ -502,7 +502,9 @@ hr {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem 1.35rem;
-  height: 160px;
+  min-height: 160px;   /* grows when narrow columns wrap the description */
+  height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
@@ -696,7 +698,22 @@ hr {
   .da-hero-title {
     font-size: 1.9rem !important;
   }
+  /* Long labels ("E-Commerce Transactions", starter questions) wrap instead of "…" */
+  .stButton > button {
+    white-space: normal !important;
+    height: auto !important;
+    min-height: 2.5rem;
+  }
+  .stButton > button p {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  .da-nav-title {
+    padding: 0.25rem 0 0.5rem 0 !important;
+  }
 }
 
-/* The real per-file limit is shown in a caption under the landing uploader. */
-[data-testid="stFileUploaderDropzoneInstructions"] small { display: none; }
+/* Streamlit's own "25MB per file" hint states the server ceiling, not the app's
+   limit; the real limit is in a caption under the uploader. */
+[data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }

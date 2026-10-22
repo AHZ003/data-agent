@@ -685,7 +685,7 @@ else:
     _sub = (f"{_n_tables} tables" if _n_tables > 1
             else f"{schema.row_count:,} rows · {schema.column_count} cols")
     nav_c.markdown(
-        f'<div style="text-align:center;padding-top:0.25rem;">'
+        f'<div class="da-nav-title" style="text-align:center;padding-top:0.25rem;">'
         f'<span style="font-weight:700;color:var(--text);font-size:1.05rem;">{_title}</span>'
         f'<span style="color:var(--text-mute);font-size:0.8rem;margin-left:0.5rem;">{_sub}</span></div>',
         unsafe_allow_html=True,
