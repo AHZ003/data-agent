@@ -19,7 +19,7 @@ from agents.storyteller_agent import generate_full_report, report_to_markdown
 from agents.orchestrator import run_analysis, run_analysis_stream
 from models.analysis_plan import SemanticSchema, ColumnRole
 from assets.ui import (
-    inject_theme, section_label, hero, feature_card,
+    inject_theme, section_label, hero, feature_grid,
     result_header, narrative_block, chip, icon,
 )
 from assets.plotly_theme import register as register_plotly_theme
@@ -563,27 +563,20 @@ if st.session_state.schema is None:
     )
 
     # Feature cards
-    f1, f2, f3 = st.columns(3, gap="medium")
-    with f1:
-        feature_card("database", "Schema profiling",
-                     "Infers column roles, distributions, and date ranges on upload.")
-    with f2:
-        feature_card("brain", "Plan, code, critique",
-                     "Planner decomposes, Coder writes SQL, Critic validates rigor.")
-    with f3:
-        feature_card("chart", "Visualize & narrate",
-                     "Picks the right chart and explains findings in plain English.")
-
-    f4, f5, f6 = st.columns(3, gap="medium")
-    with f4:
-        feature_card("predict", "Forecast & cluster",
-                     "Time-series forecasting, segmentation, and anomaly detection.")
-    with f5:
-        feature_card("shield", "Guarded SQL",
-                     "Read-only queries behind an AST allow-list, engine guards and timeouts.")
-    with f6:
-        feature_card("document", "Exec-ready reports",
-                     "One click turns your session into a branded PDF deliverable.")
+    feature_grid([
+        ("database", "Schema profiling",
+         "Infers column roles, distributions, and date ranges on upload."),
+        ("brain", "Plan, code, critique",
+         "Planner decomposes, Coder writes SQL, Critic validates rigor."),
+        ("chart", "Visualize & narrate",
+         "Picks the right chart and explains findings in plain English."),
+        ("predict", "Forecast & cluster",
+         "Time-series forecasting, segmentation, and anomaly detection."),
+        ("shield", "Guarded SQL",
+         "Read-only queries behind an AST allow-list, engine guards and timeouts."),
+        ("document", "Exec-ready reports",
+         "One click turns your session into a branded PDF deliverable."),
+    ])
 
     st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
 

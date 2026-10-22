@@ -502,8 +502,6 @@ hr {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem 1.35rem;
-  min-height: 160px;   /* grows when narrow columns wrap the description */
-  height: 100%;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -550,6 +548,21 @@ hr {
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;
+}
+
+.da-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+.da-feature-grid > .da-feature { animation: daFadeUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.da-feature-grid > .da-feature:nth-child(3n+2) { animation-delay: 0.06s; }
+.da-feature-grid > .da-feature:nth-child(3n) { animation-delay: 0.12s; }
+@media (max-width: 900px) {
+  .da-feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .da-feature-grid { grid-template-columns: 1fr; gap: 0.6rem; }
 }
 
 /* Info bar (replaces sidebar info panels) */
@@ -711,6 +724,7 @@ hr {
   }
   .da-nav-title {
     padding: 0.25rem 0 0.5rem 0 !important;
+    margin-bottom: 0.75rem !important;   /* QA: title sat 3px above "New chat" */
   }
 }
 

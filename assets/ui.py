@@ -96,6 +96,18 @@ def feature_card(icon_name: str, title: str, desc: str):
     )
 
 
+def feature_grid(cards: list[tuple[str, str, str]]):
+    """(icon, title, description) cards in one CSS grid: rows are equal height
+    and spacing is the grid gap, at any width (st.columns wrapped unevenly and
+    overlapped on phones)."""
+    items = "".join(
+        f'<div class="da-feature"><div class="da-feature-icon">{icon(i, 18)}</div>'
+        f'<div class="da-feature-title">{t}</div><p class="da-feature-desc">{d}</p></div>'
+        for i, t, d in cards
+    )
+    st.markdown(f'<div class="da-feature-grid">{items}</div>', unsafe_allow_html=True)
+
+
 def result_header(question: str):
     st.markdown(
         f"""
