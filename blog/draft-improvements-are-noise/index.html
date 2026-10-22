@@ -1054,10 +1054,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#results-on-dataagent-results-pending" class="md-nav__link">
+  <a href="#results-on-dataagent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Results on DataAgent [results pending]
+        Results on DataAgent
       
     </span>
   </a>
@@ -1151,10 +1151,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#results-on-dataagent-results-pending" class="md-nav__link">
+  <a href="#results-on-dataagent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Results on DataAgent [results pending]
+        Results on DataAgent
       
     </span>
   </a>
@@ -1193,8 +1193,7 @@
 
 
 <h1 id="most-text-to-sql-improvements-are-noise">Most text-to-SQL "improvements" are noise</h1>
-<p><em>Draft. Sections marked <strong>[results pending]</strong> need the ablation runs; every
-other number here is computed by code in this repo.</em></p>
+<p><em>Draft. Every number here is computed by code in this repo; DataAgent results are from Gemini 3.8 Flash on 200-question stratified subsets.</em></p>
 <p>You change a prompt, rerun your eval on 200 questions, and accuracy goes from
 71% to 73%. Did the change help?</p>
 <p>Probably not provably. Two runs of the <strong>same</strong> configuration differ by that
@@ -1298,12 +1297,75 @@ eval can reliably see it. On the full Spider dev set, ~3 points is the floor.</p
    <code>NULL</code> into <code>NaN</code>, and <code>NaN != None</code>, so any answer containing a NULL could
    never match. That bug would have silently depressed every score.</li>
 </ol>
-<h2 id="results-on-dataagent-results-pending">Results on DataAgent <strong>[results pending]</strong></h2>
-<ul>
-<li>Self-repair loop on vs off, Spider dev subset: Δ = __ pts [<strong>, </strong>], McNemar p = __.</li>
-<li>Each retrieval component on BIRD: Δ, CI, p.</li>
-<li>How many of our "improvements" survive the paired test: __ of __.</li>
-</ul>
+<h2 id="results-on-dataagent">Results on DataAgent</h2>
+<p>Eight comparisons, each a plausible "improvement" someone would ship:</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Δ accuracy</th>
+<th>95% CI</th>
+<th>McNemar p</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Self-repair loop (Spider)</td>
+<td>+0.5</td>
+<td>−1.0, +2.5</td>
+<td>1.0</td>
+</tr>
+<tr>
+<td>Self-repair loop (BIRD)</td>
+<td>+0.0</td>
+<td>−3.0, +3.0</td>
+<td>1.0</td>
+</tr>
+<tr>
+<td>Value hints (BIRD)</td>
+<td>+1.0</td>
+<td>−1.5, +4.0</td>
+<td>0.73</td>
+</tr>
+<tr>
+<td>Schema linking (BIRD)</td>
+<td>−1.0</td>
+<td>−4.5, +2.5</td>
+<td>0.79</td>
+</tr>
+<tr>
+<td>Few-shot memory (BIRD)</td>
+<td>+0.0</td>
+<td>−2.5, +2.5</td>
+<td>1.0</td>
+</tr>
+<tr>
+<td>All retrieval combined (BIRD)</td>
+<td>+3.5</td>
+<td>−0.5, +7.5</td>
+<td>0.14</td>
+</tr>
+<tr>
+<td>Gemini 3.1 Pro instead of 3.8 Flash (Spider)</td>
+<td>+2.0</td>
+<td>−1.5, +5.5</td>
+<td>0.42</td>
+</tr>
+<tr>
+<td>BIRD evidence hints removed</td>
+<td><strong>−17.5</strong></td>
+<td>−23.5, −11.5</td>
+<td><strong>8×10⁻⁸</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Read naively, several of these are headlines ("all retrieval combined adds 3.5
+points!", "Pro beats Flash by 2!"). None of the first seven survives the paired
+test. The one that does — taking away
+BIRD's domain hints — is a 17-point effect, the size this eval can actually see.
+The self-repair loop, a staple of agent demos, costs 6% more per question and
+does nothing measurable here: modern models' SQL almost always runs; their
+mistakes are queries that run and return the wrong thing.</p>
 <h2 id="reproduce">Reproduce</h2>
 <div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>benchmarks.power<span class="w">                 </span><span class="c1"># the tables above</span>
 python<span class="w"> </span>-m<span class="w"> </span>benchmarks.ablate<span class="w"> </span>--plan<span class="w">         </span><span class="c1"># what the ablations will cost</span>

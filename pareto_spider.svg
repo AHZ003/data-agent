@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" font-family="system-ui, sans-serif" role="img" aria-label="Cost vs accuracy — spider"><rect width="720" height="420" fill="#fcfcfb"/>
+<text x="64" y="24" font-size="15" font-weight="600" fill="#0b0b0b">Cost vs accuracy — spider</text>
+<line x1="64" x2="696" y1="364.0" y2="364.0" stroke="#e6e5e1"/><text x="56" y="368.0" font-size="11" text-anchor="end" fill="#52514e">70%</text>
+<line x1="64" x2="696" y1="258.7" y2="258.7" stroke="#e6e5e1"/><text x="56" y="262.7" font-size="11" text-anchor="end" fill="#52514e">80%</text>
+<line x1="64" x2="696" y1="153.3" y2="153.3" stroke="#e6e5e1"/><text x="56" y="157.3" font-size="11" text-anchor="end" fill="#52514e">90%</text>
+<line x1="64" x2="696" y1="48.0" y2="48.0" stroke="#e6e5e1"/><text x="56" y="52.0" font-size="11" text-anchor="end" fill="#52514e">100%</text>
+<text x="64.0" y="382" font-size="11" text-anchor="middle" fill="#52514e">$0.0001</text>
+<text x="274.7" y="382" font-size="11" text-anchor="middle" fill="#52514e">$0.001</text>
+<text x="485.3" y="382" font-size="11" text-anchor="middle" fill="#52514e">$0.01</text>
+<text x="696.0" y="382" font-size="11" text-anchor="middle" fill="#52514e">$0.1</text>
+<text x="380.0" y="408" font-size="12" text-anchor="middle" fill="#52514e">mean cost per question (USD, log scale)</text>
+<text transform="translate(16 206.0) rotate(-90)" font-size="12" text-anchor="middle" fill="#52514e">execution accuracy (95% CI)</text>
+<path d="M217.0,237.6 L341.4,227.1 L420.0,195.5 L494.8,174.4" fill="none" stroke="#52514e" stroke-width="1.5" stroke-dasharray="4 3"/>
+<g><title>3.8 Flash: 86.0% [81.0%–90.5%], $0.00489/q</title><line x1="420.0" x2="420.0" y1="248.1" y2="148.1" stroke="#2a78d6" stroke-width="2"/><circle cx="420.0" cy="195.5" r="5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/><text x="420.0" y="263.1" font-size="11" text-anchor="middle" fill="#0b0b0b">3.8 Flash</text></g>
+<g><title>3.1 Pro: 88.0% [83.5%–92.5%], $0.01109/q</title><line x1="494.8" x2="494.8" y1="221.8" y2="127.0" stroke="#2a78d6" stroke-width="2"/><circle cx="494.8" cy="174.4" r="5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/><text x="494.8" y="236.8" font-size="11" text-anchor="middle" fill="#0b0b0b">3.1 Pro</text></g>
+<g><title>3.5 Flash Lite: 82.0% [76.5%–87.0%], $0.00053/q</title><line x1="217.0" x2="217.0" y1="295.5" y2="184.9" stroke="#2a78d6" stroke-width="2"/><circle cx="217.0" cy="237.6" r="5" fill="#2a78d6" stroke="#2a78d6" stroke-width="2"/><text x="217.0" y="310.5" font-size="11" text-anchor="middle" fill="#0b0b0b">3.5 Flash Lite</text></g>
+<g><title>Router (29% escalated): 83.0% [75.0%–90.0%], $0.00207/q</title><line x1="341.4" x2="341.4" y1="311.3" y2="153.3" stroke="#eb6834" stroke-width="2"/><circle cx="341.4" cy="227.1" r="5" fill="#eb6834" stroke="#eb6834" stroke-width="2"/><text x="341.4" y="326.3" font-size="11" text-anchor="middle" fill="#0b0b0b">Router (29% escalated)</text></g>
+</svg>

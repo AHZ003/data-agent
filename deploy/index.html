@@ -1300,9 +1300,9 @@ gcloud<span class="w"> </span>secrets<span class="w"> </span>add-iam-policy-bind
 <h2 id="3-first-deploy-manual">3. First deploy (manual)</h2>
 <div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>deploy<span class="w"> </span>dataagent<span class="w"> </span>--source<span class="w"> </span>.<span class="w"> </span>--region<span class="w"> </span><span class="nv">$REGION</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--allow-unauthenticated<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--max-instances<span class="w"> </span><span class="m">2</span><span class="w"> </span>--min-instances<span class="w"> </span><span class="m">0</span><span class="w"> </span>--memory<span class="w"> </span>2Gi<span class="w"> </span>--cpu<span class="w"> </span><span class="m">1</span><span class="w"> </span>--timeout<span class="w"> </span><span class="m">300</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--max-instances<span class="w"> </span><span class="m">1</span><span class="w"> </span>--min-instances<span class="w"> </span><span class="m">0</span><span class="w"> </span>--memory<span class="w"> </span>2Gi<span class="w"> </span>--cpu<span class="w"> </span><span class="m">1</span><span class="w"> </span>--timeout<span class="w"> </span><span class="m">3600</span><span class="w"> </span>--session-affinity<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--set-secrets<span class="w"> </span><span class="nv">GOOGLE_API_KEY</span><span class="o">=</span>gemini-api-key:latest<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--set-env-vars<span class="w"> </span><span class="nv">DEMO_MODE</span><span class="o">=</span><span class="m">1</span>,DEMO_MAX_QUESTIONS_PER_SESSION<span class="o">=</span><span class="m">10</span>,DEMO_MAX_UPLOAD_MB<span class="o">=</span><span class="m">10</span>
+<span class="w">  </span>--set-env-vars<span class="w"> </span><span class="nv">DEMO_MODE</span><span class="o">=</span><span class="m">1</span>,DEMO_MAX_QUESTIONS_PER_SESSION<span class="o">=</span><span class="m">10</span>,DEMO_MAX_UPLOAD_MB<span class="o">=</span><span class="m">10</span>,STREAMLIT_SERVER_MAX_UPLOAD_SIZE<span class="o">=</span><span class="m">25</span>
 </code></pre></div>
 <p>The command prints the service URL. Open it and ask three sample questions.</p>
 <h2 id="4-budget-alert">4. Budget alert</h2>
@@ -1380,8 +1380,16 @@ image needs the Postgres extra (<code>uv sync --extra postgres</code>); add it t
 <td>Idle demo costs nothing; first request after idle takes a few seconds (cold start)</td>
 </tr>
 <tr>
-<td><code>max-instances 2</code></td>
-<td>Hard ceiling on concurrent spend from a traffic spike</td>
+<td><code>max-instances 1</code></td>
+<td>Hard ceiling on spend; also keeps the in-memory per-visitor question cap consistent</td>
+</tr>
+<tr>
+<td><code>--timeout 3600 --session-affinity</code></td>
+<td>Streamlit keeps one websocket per browser session. Cloud Run applies the request timeout to it (at 300 s every session was cut after 5 minutes: vanished chat box, lost answers), and without affinity a reconnect can land on the other instance, which has no session</td>
+</tr>
+<tr>
+<td>No shared dataset library in demo mode</td>
+<td>All visitors share one store workspace; showing "Recent datasets" would let anyone open other people's uploads</td>
 </tr>
 <tr>
 <td>Secret Manager</td>

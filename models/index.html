@@ -658,10 +658,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
+  <a href="#results-2026-10-21" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Results
+        Results (2026-10-21)
       
     </span>
   </a>
@@ -1142,10 +1142,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#results" class="md-nav__link">
+  <a href="#results-2026-10-21" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Results
+        Results (2026-10-21)
       
     </span>
   </a>
@@ -1191,12 +1191,12 @@ Spider dev subset (<code>benchmarks/ablations.yaml</code>, section P7):</p>
 <tbody>
 <tr>
 <td><code>spider-flash-repair</code></td>
-<td>Gemini 2.5 Flash</td>
+<td>Gemini 3.8 Flash</td>
 <td>default</td>
 </tr>
 <tr>
 <td><code>spider-pro-repair</code></td>
-<td>Gemini 2.5 Pro</td>
+<td>Gemini 3.1 Pro (preview)</td>
 <td>strong model</td>
 </tr>
 <tr>
@@ -1235,21 +1235,62 @@ Spider dev subset (<code>benchmarks/ablations.yaml</code>, section P7):</p>
 <li>Frontier: <code>python -m benchmarks.pareto --benchmark spider</code> →
   <code>docs/pareto_spider.svg</code>.</li>
 </ul>
-<h2 id="results">Results</h2>
-<p><strong>Pending.</strong> Needs, in order:</p>
-<ol>
-<li>A valid <code>GOOGLE_API_KEY</code>, then
-   <code>python -m benchmarks.ablate --only spider-flash-repair,spider-pro-repair</code>.</li>
-<li><code>ollama pull qwen2.5-coder:7b</code>, then <code>--only spider-qwen7b-base</code>.</li>
-<li>The QLoRA run on a GPU (<code>training/qlora_unsloth.ipynb</code>), <code>ollama create
-   dataagent-sql</code>, then <code>--only spider-finetuned-1.5b</code>.</li>
-<li><code>python -m routing.train --cheap spider-flash-repair --strong spider-pro-repair</code>,
-   then <code>--only spider-router</code>.</li>
-<li><code>python -m benchmarks.pareto --benchmark spider</code>.</li>
-</ol>
-<p>Expected shape, to be confirmed or refuted: the fine-tuned 1.5B model will not
-beat Pro; the interesting numbers are where it lands per dollar and whether the
-router recovers most of Pro's accuracy at a fraction of its cost.</p>
+<h2 id="results-2026-10-21">Results (2026-10-21)</h2>
+<p>Same 200 stratified Spider dev questions; repair mode; paired vs 3.8 Flash.</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>EX</th>
+<th>95% CI</th>
+<th>Δ vs Flash</th>
+<th>McNemar p</th>
+<th>$/question</th>
+<th>p95 latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gemini 3.5 Flash-Lite</td>
+<td>82.0%</td>
+<td>76.5–87.0%</td>
+<td>−4.0</td>
+<td>0.13</td>
+<td>$0.00053</td>
+<td>1.4 s</td>
+</tr>
+<tr>
+<td>Gemini 3.8 Flash</td>
+<td>86.0%</td>
+<td>81.0–90.5%</td>
+<td>—</td>
+<td>—</td>
+<td>$0.00489</td>
+<td>43.6 s</td>
+</tr>
+<tr>
+<td>Gemini 3.1 Pro (preview)</td>
+<td>88.0%</td>
+<td>83.5–92.5%</td>
+<td>+2.0</td>
+<td>0.42</td>
+<td>$0.01109</td>
+<td>57.3 s</td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Cost vs accuracy" src="../pareto_spider.svg" /></p>
+<ul>
+<li>Neither difference is significant at n=200, but the cost and latency gaps are
+  large: Flash-Lite is 9× cheaper and ~30× faster at p95 for ~4 points.</li>
+<li><strong>Router.</strong> Trained on half the questions, evaluated on the other half
+  (n=100). A Flash-Lite → <strong>Pro</strong> router reached Pro's 84% only at 66% of Pro's
+  cost — and plain 3.8 Flash scored the same 84% on those questions for less, so
+  escalating to Pro is dominated. A Flash-Lite → <strong>Flash</strong> router matches Flash's
+  84% at 59% of Flash's cost (38% of questions escalated), or 83% at 48%. With
+  n=100 the CIs are ±7 pts; treat as promising, not settled.</li>
+<li>Fine-tuned 1.5B model and local Qwen-7B: <strong>pending</strong> (GPU run / Ollama).</li>
+</ul>
 
 
 

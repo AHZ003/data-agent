@@ -475,6 +475,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#end-to-end-results-on-bird-2026-10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        End-to-end results on BIRD (2026-10-21)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1108,6 +1119,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#end-to-end-results-on-bird-2026-10-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        End-to-end results on BIRD (2026-10-21)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1269,8 +1291,61 @@ schema. BM25 only unless stated.</p>
   above are unpaired, so the paired test on the end-to-end ablation is the one
   to cite.</li>
 </ul>
-<p>End-to-end EX lift per component: pending the ablation run
-(<code>python -m benchmarks.ablate --only bird-flash-values,bird-flash-schema30,...</code>).</p>
+<h2 id="end-to-end-results-on-bird-2026-10-21">End-to-end results on BIRD (2026-10-21)</h2>
+<p>Gemini 3.8 Flash, evidence hints on, repair mode, same 200 questions, paired vs
+no retrieval (72.5%):</p>
+<table>
+<thead>
+<tr>
+<th>Config</th>
+<th>EX</th>
+<th>Δ (95% CI)</th>
+<th>McNemar p</th>
+<th>discordant (base/this)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Value hints</td>
+<td>73.5%</td>
+<td>+1.0 (−1.5, +4.0)</td>
+<td>0.73</td>
+<td>3/5</td>
+</tr>
+<tr>
+<td>Schema linking, k=30</td>
+<td>71.5%</td>
+<td>−1.0 (−4.5, +2.5)</td>
+<td>0.79</td>
+<td>8/6</td>
+</tr>
+<tr>
+<td>Schema linking + values</td>
+<td>72.0%</td>
+<td>−0.5 (−4.0, +2.5)</td>
+<td>1.0</td>
+<td>6/5</td>
+</tr>
+<tr>
+<td>Query memory (3 few-shot, Spider train)</td>
+<td>72.5%</td>
+<td>0.0 (−2.5, +2.5)</td>
+<td>1.0</td>
+<td>3/3</td>
+</tr>
+<tr>
+<td>All combined</td>
+<td><strong>76.0%</strong></td>
+<td><strong>+3.5 (−0.5, +7.5)</strong></td>
+<td>0.14</td>
+<td>5/12</td>
+</tr>
+</tbody>
+</table>
+<p>No single component moves accuracy measurably; together they are the best
+configuration, but the gain is not significant at n=200. Pruning saved almost
+no cost because the rendered BIRD schemas are only ~2k tokens. Next test: the
+full 500-question set roughly doubles the power for the combined config.</p>
 
 
 
