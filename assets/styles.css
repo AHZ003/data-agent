@@ -731,3 +731,17 @@ hr {
 /* Streamlit's own "25MB per file" hint states the server ceiling, not the app's
    limit; the real limit is in a caption under the uploader. */
 [data-testid="stFileUploaderDropzoneInstructions"] { display: none !important; }
+
+/* Starter questions wrap at every width (keys sq_* before the first question,
+   sqx_* in the "Starter questions" expander after it). */
+[class*="st-key-sq_"] button, [class*="st-key-sqx_"] button {
+  white-space: normal !important;
+  height: auto !important;
+  min-height: 3.2rem;
+  text-align: left;
+}
+[class*="st-key-sq_"] button p, [class*="st-key-sqx_"] button p {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}

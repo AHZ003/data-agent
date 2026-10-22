@@ -41,6 +41,25 @@ USD_PER_TIB = float(os.getenv("BQ_USD_PER_TIB", "6.25"))  # on-demand, US multi-
 COST_SENTINEL = "CostConfirmationRequired"
 
 
+def to_plain_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """BigQuery's DataFrame types as the rest of the app expects them.
+
+    DATE arrives as db-dtypes `dbdate` and NUMERIC as Decimal objects; the
+    visualizer saw neither as a date or a number (a month-by-month trend
+    rendered as a raw table, a 26.6518 average went unrounded).
+    """
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        if dtype == "dbdate":
+            df[col] = pd.to_datetime(df[col])
+        elif dtype == "dbtime":
+            df[col] = df[col].astype(str)
+        elif df[col].dtype == object and df[col].map(lambda v: v is None or hasattr(v, "as_tuple")).all() \
+                and df[col].notna().any():
+            df[col] = df[col].astype(float)
+    return df
+
+
 def estimate(bytes_processed: int) -> CostEstimate:
     return CostEstimate(bytes_processed, round(bytes_processed / 2**40 * USD_PER_TIB, 6))
 
@@ -106,18 +125,15 @@ class BigQueryEngine(Engine):
             job = self.client.query(safe_sql, job_config=self._job_config(maximum_bytes_billed=self.max_bytes),
                                     timeout=self.api_timeout)
             rows = job.result(timeout=self.timeout_seconds, max_results=max_rows or self.max_rows)
-            return rows.to_dataframe(), None
+            return to_plain_frame(rows.to_dataframe()), None
         except Exception as e:
             return None, f"{type(e).__name__}: {str(e).splitlines()[0]}"
 
     def sample_frame(self, n: int = 2000) -> pd.DataFrame:
         """Rows of the primary table for profiling, via tabledata.list (free).
         A `SELECT *` sample would bill a scan of every column."""
-        df = self.client.list_rows(self.table_name, max_results=n, timeout=self.api_timeout).to_dataframe()
-        for col in df.columns:  # NUMERIC arrives as Decimal objects
-            if df[col].dtype == object and df[col].map(lambda v: v is None or hasattr(v, "as_tuple")).all():
-                df[col] = df[col].astype(float)
-        return df
+        return to_plain_frame(self.client.list_rows(self.table_name, max_results=n,
+                                                     timeout=self.api_timeout).to_dataframe())
 
     def fetch(self, sql: str, params: tuple = ()) -> list[tuple]:
         raise NotImplementedError("BigQuery introspection uses table metadata, not queries")
