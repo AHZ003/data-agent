@@ -19,7 +19,7 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --locked
+        run: uv sync --locked --extra bigquery  # the demo image ships it; its tests need db-dtypes
 
       - name: Run pytest
         env:
@@ -43,7 +43,7 @@ jobs:
 
       - name: Install
         if: env.GOOGLE_API_KEY != ''
-        run: uv sync --locked
+        run: uv sync --locked --extra bigquery  # the demo image ships it; its tests need db-dtypes
 
       - name: Chinook golden SQL set (105 questions, SQL only)
         if: env.GOOGLE_API_KEY != ''
