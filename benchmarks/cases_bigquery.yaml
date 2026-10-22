@@ -1,62 +1,180 @@
-# BigQuery golden set over NYC yellow taxi trips (public dataset).
+# BigQuery golden set: NYC yellow taxi trips, 2022 (36M rows).
+# The source table covers January to November 2022 (December has 57 stray rows),
+# so no question asks about December.
 #
-# STATUS: scaffold, NOT validated. Column names follow the public
-# schema as documented; confirm with
-#   python -m benchmarks.bigquery_eval --check    (dry runs only: free)
-# then run the gold queries once and extend to 30-50 cases.
+# Tables are the partitioned copy built by scripts/bigquery_setup.py:
+#   {project}.nyc_taxi.trips_2022  PARTITION BY DATE(pickup_datetime), CLUSTER BY pickup_location_id
+#   {project}.nyc_taxi.zones       zone_id, zone_name, borough
+# `{project}` is replaced with $BQ_PROJECT.
 #
-# Every gold query filters on pickup_datetime so it stays cheap if the
-# table is partitioned on it; `bytes scanned` is reported per case.
+# Validate with `python -m benchmarks.bigquery_eval --check` (free dry runs).
+# Questions name their output (a number, a hour, a zone name, a month
+# number) so a correct answer can be matched against gold without guessing
+# labels. Tags: `pruned` = the question has a date range, so a filter on
+# the partition column can cut bytes scanned; `join` = needs the zones table.
 
 tables:
-  - bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022
+  - "{project}.nyc_taxi.trips_2022"
+  - "{project}.nyc_taxi.zones"
 
 cases:
   - id: bq_001
     question: How many yellow taxi trips started on January 1st, 2022?
-    gold_sql: SELECT COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) = '2022-01-01'
-    tags: [aggregation, time]
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) = '2022-01-01'
+    tags: [aggregation, pruned]
   - id: bq_002
     question: What was the average fare amount in March 2022?
-    gold_sql: SELECT AVG(fare_amount) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-03-01' AND '2022-03-31'
-    tags: [aggregation, time]
+    gold_sql: SELECT AVG(fare_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-03-01' AND '2022-03-31'
+    tags: [aggregation, pruned]
   - id: bq_003
-    question: How many trips were there per day in the first week of February 2022? Order by date.
-    gold_sql: SELECT DATE(pickup_datetime) AS d, COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-02-01' AND '2022-02-07' GROUP BY d ORDER BY d
-    tags: [time, breakdown]
+    question: How many trips were there per day in the first week of February 2022 (Feb 1-7)? Return the date and the count, ordered by date.
+    gold_sql: SELECT DATE(pickup_datetime) AS d, COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-02-01' AND '2022-02-07' GROUP BY d ORDER BY d
+    tags: [breakdown, pruned]
   - id: bq_004
-    question: What share of trips in April 2022 were paid by credit card (payment type 1), as a percentage?
-    gold_sql: SELECT 100 * COUNTIF(payment_type = '1') / COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-04-01' AND '2022-04-30'
-    tags: [ratio]
+    question: What percentage of trips in April 2022 were paid by credit card?
+    gold_sql: SELECT 100 * COUNTIF(payment_type = '1') / COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-04-01' AND '2022-04-30'
+    tags: [ratio, pruned]
   - id: bq_005
-    question: What was the average tip as a percentage of the fare for card-paid trips in May 2022?
-    gold_sql: SELECT 100 * AVG(SAFE_DIVIDE(tip_amount, fare_amount)) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-05-01' AND '2022-05-31' AND payment_type = '1' AND fare_amount > 0
-    tags: [ratio, filter]
+    question: For credit-card trips with a positive fare in May 2022, what was the average tip as a percentage of the fare?
+    gold_sql: SELECT 100 * AVG(tip_amount / fare_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-05-01' AND '2022-05-31' AND payment_type = '1' AND fare_amount > 0
+    tags: [ratio, pruned]
   - id: bq_006
-    question: Which hour of the day had the most pickups in June 2022?
-    gold_sql: SELECT EXTRACT(HOUR FROM pickup_datetime) AS h FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-06-01' AND '2022-06-30' GROUP BY h ORDER BY COUNT(*) DESC LIMIT 1
-    tags: [time, ranking]
+    question: Which hour of the day (0-23) had the most pickups in June 2022?
+    gold_sql: SELECT EXTRACT(HOUR FROM pickup_datetime) AS h FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-06-01' AND '2022-06-30' GROUP BY h ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [ranking, pruned]
   - id: bq_007
-    question: What were the top 5 pickup location ids by number of trips in July 2022, most first?
-    gold_sql: SELECT pickup_location_id FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-07-01' AND '2022-07-31' GROUP BY pickup_location_id ORDER BY COUNT(*) DESC LIMIT 5
-    tags: [ranking, top_n]
+    question: What were the 5 pickup zones (zone names) with the most trips in July 2022, most first?
+    gold_sql: SELECT z.zone_name FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-07-01' AND '2022-07-31' GROUP BY z.zone_name ORDER BY COUNT(*) DESC LIMIT 5
+    tags: [ranking, join, pruned]
   - id: bq_008
-    question: What was the average trip distance in miles on weekends versus weekdays in August 2022?
-    gold_sql: SELECT EXTRACT(DAYOFWEEK FROM pickup_datetime) IN (1, 7) AS weekend, AVG(trip_distance) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-08-01' AND '2022-08-31' GROUP BY weekend
-    tags: [comparison, time]
+    question: What was the average trip distance on weekend days (Saturday and Sunday) in August 2022?
+    gold_sql: SELECT AVG(trip_distance) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-08-01' AND '2022-08-31' AND EXTRACT(DAYOFWEEK FROM pickup_datetime) IN (1, 7)
+    tags: [filter, pruned]
   - id: bq_009
-    question: What was the median trip duration in minutes in September 2022?
-    gold_sql: SELECT APPROX_QUANTILES(TIMESTAMP_DIFF(dropoff_datetime, pickup_datetime, MINUTE), 100)[OFFSET(50)] FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-09-01' AND '2022-09-30'
-    tags: [aggregation, time]
+    question: How many trips in September 2022 lasted more than two hours (dropoff more than 7200 seconds after pickup)?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-09-01' AND '2022-09-30' AND TIMESTAMP_DIFF(dropoff_datetime, pickup_datetime, SECOND) > 7200
+    tags: [filter, pruned]
   - id: bq_010
-    question: What was the total revenue (total amount) per month in 2022? Order by month.
-    gold_sql: SELECT FORMAT_DATE('%Y-%m', DATE(pickup_datetime)) AS m, SUM(total_amount) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-01-01' AND '2022-12-31' GROUP BY m ORDER BY m
-    tags: [time, breakdown]
+    question: What was the total of total_amount for each month of 2022? Return the month number (1-12) and the total, ordered by month.
+    gold_sql: SELECT EXTRACT(MONTH FROM pickup_datetime) AS m, SUM(total_amount) FROM `{project}.nyc_taxi.trips_2022` GROUP BY m ORDER BY m
+    tags: [breakdown, full_year]
   - id: bq_011
     question: How many trips in October 2022 had more than 4 passengers?
-    gold_sql: SELECT COUNT(*) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-10-01' AND '2022-10-31' AND passenger_count > 4
-    tags: [filter, aggregation]
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-10-01' AND '2022-10-31' AND passenger_count > 4
+    tags: [filter, pruned]
   - id: bq_012
     question: What was the average fare per mile for trips longer than 1 mile in November 2022?
-    gold_sql: SELECT AVG(fare_amount / trip_distance) FROM `bigquery-public-data.new_york_taxi_trips.tlc_yellow_trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-11-01' AND '2022-11-30' AND trip_distance > 1
-    tags: [ratio, filter]
+    gold_sql: SELECT AVG(fare_amount / trip_distance) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-11-01' AND '2022-11-30' AND trip_distance > 1
+    tags: [ratio, pruned]
+  - id: bq_013
+    question: How many taxi trips are there in total in 2022?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022`
+    tags: [aggregation, full_year]
+  - id: bq_014
+    question: Which borough had the most pickups in January 2022?
+    gold_sql: SELECT z.borough FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-01-01' AND '2022-01-31' GROUP BY z.borough ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [ranking, join, pruned]
+  - id: bq_015
+    question: How many trips in May 2022 were picked up in Manhattan and dropped off at JFK Airport?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` p ON t.pickup_location_id = p.zone_id JOIN `{project}.nyc_taxi.zones` d ON t.dropoff_location_id = d.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-05-01' AND '2022-05-31' AND p.borough = 'Manhattan' AND d.zone_name = 'JFK Airport'
+    tags: [filter, join, pruned]
+  - id: bq_016
+    question: What was the average total amount of JFK rate-code trips in 2022?
+    gold_sql: SELECT AVG(total_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE rate_code = '2.0'
+    tags: [filter, coded_value, full_year]
+  - id: bq_017
+    question: How many trips started in each borough in November 2022? Return the borough and the count.
+    gold_sql: SELECT z.borough, COUNT(*) FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-11-01' AND '2022-11-30' GROUP BY z.borough
+    tags: [breakdown, join, pruned]
+  - id: bq_018
+    question: Which dropoff zone (zone name) received the most trips that started on Halloween, October 31, 2022?
+    gold_sql: SELECT z.zone_name FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.dropoff_location_id = z.zone_id WHERE DATE(t.pickup_datetime) = '2022-10-31' GROUP BY z.zone_name ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [ranking, join, pruned]
+  - id: bq_019
+    question: What was the total amount of tips in February 2022?
+    gold_sql: SELECT SUM(tip_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-02-01' AND '2022-02-28'
+    tags: [aggregation, pruned]
+  - id: bq_020
+    question: What percentage of trips in June 2022 were paid in cash?
+    gold_sql: SELECT 100 * COUNTIF(payment_type = '2') / COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-06-01' AND '2022-06-30'
+    tags: [ratio, coded_value, pruned]
+  - id: bq_021
+    question: What was the average passenger count in July 2022?
+    gold_sql: SELECT AVG(passenger_count) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-07-01' AND '2022-07-31'
+    tags: [aggregation, pruned]
+  - id: bq_022
+    question: How many trips in August 2022 had a trip distance of zero?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-08-01' AND '2022-08-31' AND trip_distance = 0
+    tags: [filter, pruned]
+  - id: bq_023
+    question: Which date in February 2022 had the fewest trips?
+    gold_sql: SELECT DATE(pickup_datetime) AS d FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-02-01' AND '2022-02-28' GROUP BY d ORDER BY COUNT(*) ASC LIMIT 1
+    tags: [ranking, pruned]
+  - id: bq_024
+    question: What was the average trip distance of trips picked up at LaGuardia Airport in April 2022?
+    gold_sql: SELECT AVG(t.trip_distance) FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-04-01' AND '2022-04-30' AND z.zone_name = 'LaGuardia Airport'
+    tags: [filter, join, pruned]
+  - id: bq_025
+    question: How many trips in January 2022 started and ended in the same zone?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-01-01' AND '2022-01-31' AND pickup_location_id = dropoff_location_id
+    tags: [filter, pruned]
+  - id: bq_026
+    question: What was the total airport fee collected in 2022?
+    gold_sql: SELECT SUM(airport_fee) FROM `{project}.nyc_taxi.trips_2022`
+    tags: [aggregation, full_year]
+  - id: bq_027
+    question: How many distinct pickup zones had at least one trip in November 2022?
+    gold_sql: SELECT COUNT(DISTINCT pickup_location_id) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-11-01' AND '2022-11-30'
+    tags: [aggregation, pruned]
+  - id: bq_028
+    question: For credit-card trips in October 2022, which hour of the day (0-23) had the highest average tip amount?
+    gold_sql: SELECT EXTRACT(HOUR FROM pickup_datetime) AS h FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-10-01' AND '2022-10-31' AND payment_type = '1' GROUP BY h ORDER BY AVG(tip_amount) DESC LIMIT 1
+    tags: [ranking, coded_value, pruned]
+  - id: bq_029
+    question: Which vendor id had the most trips in 2022?
+    gold_sql: SELECT vendor_id FROM `{project}.nyc_taxi.trips_2022` GROUP BY vendor_id ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [ranking, full_year]
+  - id: bq_030
+    question: In September 2022, what was the average total amount for credit-card trips and for cash trips? Return the payment type code and the average.
+    gold_sql: SELECT payment_type, AVG(total_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-09-01' AND '2022-09-30' AND payment_type IN ('1', '2') GROUP BY payment_type
+    tags: [breakdown, coded_value, pruned]
+  - id: bq_031
+    question: How many trips in 2022 had a negative total amount?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE total_amount < 0
+    tags: [filter, full_year]
+  - id: bq_032
+    question: How many trips started on Thanksgiving Day 2022 (November 24)?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) = '2022-11-24'
+    tags: [aggregation, pruned]
+  - id: bq_033
+    question: Which 3 dropoff boroughs had the highest total_amount in the first quarter of 2022 (January to March)? Return the boroughs, highest first.
+    gold_sql: SELECT z.borough FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.dropoff_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-01-01' AND '2022-03-31' GROUP BY z.borough ORDER BY SUM(t.total_amount) DESC LIMIT 3
+    tags: [ranking, join, pruned]
+  - id: bq_034
+    question: For credit-card trips with a positive fare picked up at JFK Airport in 2022, what was the average tip as a percentage of the fare?
+    gold_sql: SELECT 100 * AVG(t.tip_amount / t.fare_amount) FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE z.zone_name = 'JFK Airport' AND t.payment_type = '1' AND t.fare_amount > 0
+    tags: [ratio, join, coded_value, full_year]
+  - id: bq_035
+    question: How many trips were there in each month of the first half of 2022? Return the month number (1-6) and the count, ordered by month.
+    gold_sql: SELECT EXTRACT(MONTH FROM pickup_datetime) AS m, COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-01-01' AND '2022-06-30' GROUP BY m ORDER BY m
+    tags: [breakdown, pruned]
+  - id: bq_036
+    question: Which Brooklyn pickup zone (zone name) had the most trips in June 2022?
+    gold_sql: SELECT z.zone_name FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) BETWEEN '2022-06-01' AND '2022-06-30' AND z.borough = 'Brooklyn' GROUP BY z.zone_name ORDER BY COUNT(*) DESC LIMIT 1
+    tags: [ranking, join, pruned]
+  - id: bq_037
+    question: What was the longest trip distance recorded in July 2022?
+    gold_sql: SELECT MAX(trip_distance) FROM `{project}.nyc_taxi.trips_2022` WHERE DATE(pickup_datetime) BETWEEN '2022-07-01' AND '2022-07-31'
+    tags: [aggregation, pruned]
+  - id: bq_038
+    question: How many trips in 2022 had more than 6 passengers?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` WHERE passenger_count > 6
+    tags: [filter, full_year]
+  - id: bq_039
+    question: What was the average fare amount of trips longer than 10 miles in 2022?
+    gold_sql: SELECT AVG(fare_amount) FROM `{project}.nyc_taxi.trips_2022` WHERE trip_distance > 10
+    tags: [filter, full_year]
+  - id: bq_040
+    question: How many trips picked up in the Times Square/Theatre District zone on March 15, 2022?
+    gold_sql: SELECT COUNT(*) FROM `{project}.nyc_taxi.trips_2022` t JOIN `{project}.nyc_taxi.zones` z ON t.pickup_location_id = z.zone_id WHERE DATE(t.pickup_datetime) = '2022-03-15' AND z.zone_name = 'Times Sq/Theatre District'
+    tags: [filter, join, pruned]

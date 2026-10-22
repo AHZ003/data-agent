@@ -28,7 +28,8 @@ from assets.streaming import type_stream
 from agents import storyteller_agent
 from db import store
 from core import pii, tracing
-from core.demo import SAMPLE_QUESTIONS, DemoLimits, VisitorBudget, load_sample_workspace
+from core.demo import (SAMPLE_QUESTIONS, TAXI_QUESTIONS, DemoLimits, VisitorBudget,
+                       load_sample_workspace, load_taxi_workspace, taxi_enabled)
 from core.llm import api_key_override
 import feedback
 
@@ -163,6 +164,16 @@ def init_sample_workspace():
     schema = profile_dataframe(df, db.table_name, suggest_questions=False)
     schema.suggested_questions = list(SAMPLE_QUESTIONS)
     _set_workspace(db, df, schema, "chinook")
+    st.session_state.dataset_id = None
+
+
+def init_taxi_workspace():
+    """36M NYC taxi trips in BigQuery. Profiling uses a free row listing."""
+    db = load_taxi_workspace()
+    df = db.sample_frame(2000)
+    schema = profile_dataframe(df, db.table_name, suggest_questions=False)
+    schema.suggested_questions = list(TAXI_QUESTIONS)
+    _set_workspace(db, df, schema, "nyc_taxi")
     st.session_state.dataset_id = None
 
 
@@ -351,6 +362,35 @@ def _render_sql_editor(analysis: dict):
             st.dataframe(df, width="stretch", hide_index=True)
 
 
+def _confirm_text(error: str) -> str:
+    estimate = (error.split(":", 1)[1].strip() if ":" in error else error).replace(" scanned", "")
+    return (f"This query {estimate.replace('query would scan', 'would scan')}, above the "
+            f"{_confirm_limit()} you approve before it runs. Check the SQL, then run it or rephrase "
+            "the question with a narrower date range.")
+
+
+def _confirm_limit() -> str:
+    return f"{int(os.getenv('BQ_CONFIRM_BYTES', str(10 * 2**30))) / 2**30:g} GiB"
+
+
+def _render_cost_confirmation(analysis: dict):
+    """A BigQuery query above the confirm threshold: show the dry-run estimate
+    and the SQL, and execute only when the user clicks."""
+    st.warning(md_safe(_confirm_text(analysis.get("error") or "")))
+    st.code(analysis.get("sql_query") or "", language="sql")
+    key = f"confirm_{analysis.get('run_id') or id(analysis)}"
+    if st.button("Run it", key=key, type="primary"):
+        with st.spinner("Running on BigQuery..."):
+            df, err = st.session_state.db.execute_query(analysis["sql_query"], confirm_cost=True)
+        if err:
+            st.error(err)
+            return
+        analysis.update(needs_confirm=False, result_df=df, chart=None, validation=None,
+                        scan=st.session_state.db.last_cost.fmt() if st.session_state.db.last_cost else None,
+                        narrative=f"Ran after your confirmation: {len(df):,} row{'s' if len(df) != 1 else ''}.")
+        st.rerun()
+
+
 def _render_feedback(analysis: dict):
     run_id = analysis.get("run_id")
     if not run_id:
@@ -367,6 +407,10 @@ def render_assistant_body(analysis: dict, should_stream: bool):
     """Render chart + narrative + chips + expanders inside an assistant message."""
     validation = analysis.get("validation") or {}
     conf = validation.get("confidence")
+
+    if analysis.get("needs_confirm"):
+        _render_cost_confirmation(analysis)
+        return
 
     if analysis.get("declined"):
         # Out-of-scope / write request: a plain decline, no warnings or red confidence.
@@ -425,6 +469,9 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             f'<div style="font-size:1.1rem;font-weight:600;color:var(--text);">{sql_label}</div>',
             unsafe_allow_html=True,
         )
+
+    if analysis.get("scan"):
+        st.caption(f"BigQuery dry run before execution: {analysis['scan']}")
 
     _render_feedback(analysis)
 
@@ -515,6 +562,9 @@ def _restore_from_url(ds: str) -> bool:
     if ds == "chinook":
         init_sample_workspace()
         return True
+    if ds == "nyc_taxi" and taxi_enabled():
+        init_taxi_workspace()
+        return True
     for name, path in _SAMPLES.items():
         if ds == name.lower().replace(" ", "_") and os.path.exists(path):
             init_database(pd.read_csv(path), ds, original_filename=os.path.basename(path))
@@ -586,6 +636,11 @@ if st.session_state.schema is None:
                  width="stretch", type="primary"):
         with st.spinner("Opening sample database..."):
             init_sample_workspace()
+        st.rerun()
+    if taxi_enabled() and st.button("NYC taxi trips — 36M rows in BigQuery (cost-guarded)", key="qs_taxi",
+                                    width="stretch", type="primary"):
+        with st.spinner("Connecting to BigQuery..."):
+            init_taxi_workspace()
         st.rerun()
     qs1, qs2, qs3 = st.columns(3, gap="medium")
     for col, (name, path) in zip([qs1, qs2, qs3], _SAMPLES.items()):
@@ -674,7 +729,8 @@ else:
         clear_session()
         st.rerun()
     _n_tables = len(st.session_state.db.datasource().tables)
-    _title = (st.query_params.get("ds") or schema.table_name).replace("_", " ").title()
+    _ds = st.query_params.get("ds") or schema.table_name
+    _title = {"nyc_taxi": "NYC Taxi · BigQuery"}.get(_ds) or _ds.replace("_", " ").title()
     _sub = (f"{_n_tables} tables" if _n_tables > 1
             else f"{schema.row_count:,} rows · {schema.column_count} cols")
     nav_c.markdown(
@@ -791,6 +847,8 @@ else:
         # Show the question right away, not only after the 20-40 s run.
         with st.chat_message("user", avatar=":material/person:"):
             st.markdown(prompt)
+        if hasattr(st.session_state.db, "last_cost"):
+            st.session_state.db.last_cost = None
         key_scope = api_key_override(st.session_state.user_api_key)
         key_scope.__enter__()
         try:
@@ -838,6 +896,8 @@ else:
                     if error_msg.startswith("OutOfScope"):
                         narrative = ("I can't answer that from this data: "
                                      + error_msg.split(":", 1)[1].strip())
+                    elif error_msg.startswith("CostConfirmationRequired"):
+                        narrative = _confirm_text(error_msg)
                     elif "QuotaExhausted" in error_msg:
                         narrative = "The AI service quota has been exceeded. Please try again later."
                     elif not has_data:
@@ -853,6 +913,8 @@ else:
                             "may be inaccurate — consider rephrasing the question."
                         )
                     (st.info if error_msg.startswith("OutOfScope") else st.warning)(narrative)
+                    if error_msg.startswith("CostConfirmationRequired"):
+                        st.caption("Use **Run it** below to go ahead.")
                 else:
                     result_summary = storyteller_agent.summarize_result(
                         result_df, pii.detect(st.session_state.db.datasource()))
@@ -906,6 +968,9 @@ else:
                 "validation": result.get("validation"),
                 "error": result.get("error"),
                 "declined": (result.get("error") or "").startswith("OutOfScope"),
+                "needs_confirm": (result.get("error") or "").startswith("CostConfirmationRequired"),
+                "scan": (st.session_state.db.last_cost.fmt()
+                         if getattr(st.session_state.db, "last_cost", None) else None),
                 "run_id": result.get("run_id"),
             }
             analysis_id = None

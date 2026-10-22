@@ -31,6 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 bigquery = [
     "google-cloud-bigquery>=3.25",
+    "db-dtypes>=1.2",  # RowIterator.to_dataframe() requires it
 ]
 postgres = [
     "langgraph-checkpoint-postgres>=2.0",

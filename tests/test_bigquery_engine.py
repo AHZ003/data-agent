@@ -17,14 +17,14 @@ class FakeClient:
         self.bytes_for = bytes_for      # sql -> bytes the dry run reports
         self.executed = []
 
-    def query(self, sql, job_config):
+    def query(self, sql, job_config, timeout=None):
         if job_config.get("dry_run"):
             return SimpleNamespace(total_bytes_processed=self.bytes_for(sql))
         self.executed.append((sql, job_config))
         df = pd.DataFrame({"n": [42]})
         return SimpleNamespace(result=lambda timeout, max_results: SimpleNamespace(to_dataframe=lambda: df))
 
-    def get_table(self, table_id):
+    def get_table(self, table_id, timeout=None):
         f = lambda name, t, mode="NULLABLE", d=None: SimpleNamespace(name=name, field_type=t, mode=mode, description=d)  # noqa: E731
         return SimpleNamespace(
             schema=[f("pickup_datetime", "TIMESTAMP"), f("fare_amount", "NUMERIC"),
@@ -33,9 +33,17 @@ class FakeClient:
             clustering_fields=["payment_type"], num_rows=36_000_000,
         )
 
-    def list_rows(self, meta, max_results):
-        return [SimpleNamespace(items=lambda: {"pickup_datetime": "2022-01-01 00:10:00",
-                                                "fare_amount": 9.5, "payment_type": "1"}.items())]
+    def list_rows(self, meta, max_results, timeout=None):
+        return _Rows([SimpleNamespace(items=lambda: {"pickup_datetime": "2022-01-01 00:10:00",
+                                                      "fare_amount": 9.5, "payment_type": "1"}.items())])
+
+
+class _Rows(list):
+    """RowIterator stand-in: iterable, and to_dataframe() with NUMERIC as Decimal."""
+
+    def to_dataframe(self):
+        from decimal import Decimal
+        return pd.DataFrame({"fare_amount": [Decimal("9.50"), None], "payment_type": ["1", "2"]})
 
 
 @pytest.fixture
@@ -107,3 +115,32 @@ def test_coder_repairs_after_cost_guard_and_stops_for_confirmation(engine):
         df, res = coder_agent.generate_and_execute("all fares", engine)
     assert res.error.startswith(COST_SENTINEL) and res.attempts == 1
     assert coder_agent.is_terminal_error(res.error)
+
+
+def test_last_cost_records_the_dry_run(engine):
+    engine.execute_query(f"SELECT COUNT(*) AS n FROM `{TABLE}` WHERE DATE(pickup_datetime) = '2022-01-01'")
+    assert engine.last_cost.bytes_processed == 2 * GiB
+    engine.max_bytes = 100 * GiB
+    engine.execute_query(f"SELECT fare_amount FROM `{TABLE}`")       # needs confirmation, not run
+    assert engine.last_cost.bytes_processed == 60 * GiB
+
+
+def test_sample_is_a_free_row_listing_not_a_query(engine):
+    from agents.orchestrator import _sample_primary_table
+    df = _sample_primary_table(engine)
+    assert engine.client.executed == []                     # no billed query
+    assert df["fare_amount"].dtype == float                 # Decimal -> float for profiling
+
+
+def test_table_description_reaches_the_prompt():
+    from core.datasource import Column, DataSource, Table
+    ds = DataSource("t", [Table("trips", [Column("a", "INT64")], description="pickups Jan-Nov 2022")], "bigquery")
+    assert "-- pickups Jan-Nov 2022" in ds.to_prompt()
+
+
+def test_extra_columns_match_needs_every_gold_column():
+    from benchmarks.bigquery_eval import match_extra_columns
+    sql = "SELECT h FROM t ORDER BY n DESC LIMIT 1"
+    assert match_extra_columns([(18,)], [(18, 312_000)], sql)          # hour + its count
+    assert not match_extra_columns([(18,)], [(17, 312_000)], sql)
+    assert not match_extra_columns([("a", 1), ("b", 2)], [("a", 9)], "SELECT x, y FROM t")

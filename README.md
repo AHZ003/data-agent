@@ -29,9 +29,10 @@ Measured numbers only, Gemini 3.8 Flash unless stated; 200-question difficulty-s
 | Retrieval on BIRD | each component alone ±1 pt (n.s.); all combined **76.0%**, +3.5 pts [−0.5, +7.5], p = 0.14 — promising, not significant at n=200 |
 | Cost/accuracy frontier (Spider) | Flash-Lite 82.0% at $0.0005 · 3.8 Flash 86.0% at $0.0049 · 3.1 Pro 88.0% at $0.0111 ([chart](docs/pareto_spider.svg)) |
 | Difficulty router, Flash-Lite → Flash | Flash's 84% at **59% of its cost** (held-out n=100); 83% at 48% |
+| BigQuery, NYC taxi (36M rows, 40 questions) | **97.5%** [92.5, 100] EX with extra columns allowed (75.0% strict); partitioned layout scans **90% less** on date-range questions; partition prompt hints: no effect (p = 1.0) ([scale](docs/scale.md)) |
 | Fine-tuned 1.5B open model | **pending** (GPU run) |
 | Red team, data-borne prompt injection (18 attacks) | 1/18 succeed with prompt hardening off, **0/18** on (1 vs 0 is not a significant difference) |
-| Tests | **284**, ~10 s, no API key |
+| Tests | **303**, ~11 s, no API key |
 
 ---
 

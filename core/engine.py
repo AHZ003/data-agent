@@ -22,9 +22,12 @@ class CostEstimate:
     bytes_processed: int
     usd: float
 
-    def fmt(self) -> str:
+    def size(self) -> str:
         gib = self.bytes_processed / 2**30
-        return f"{gib:,.2f} GiB scanned (~${self.usd:,.4f})"
+        return f"{gib:,.2f} GiB" if gib >= 0.1 else f"{self.bytes_processed / 2**20:,.0f} MiB"
+
+    def fmt(self) -> str:
+        return f"{self.size()} scanned (~${self.usd:,.4f})"
 
 
 class Engine(ABC):

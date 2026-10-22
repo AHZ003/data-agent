@@ -78,6 +78,8 @@ def _pii_report(state):
 
 
 def _sample_primary_table(db, n: int = 50_000) -> pd.DataFrame:
+    if hasattr(db, "sample_frame"):  # warehouse: free row listing, never a billed scan
+        return db.sample_frame(min(n, 2000))
     q = '"' + db.table_name.replace('"', '""') + '"'
     df, err = db.execute_query(f"SELECT * FROM {q}", max_rows=n)
     return df if err is None else pd.DataFrame()
