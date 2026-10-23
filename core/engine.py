@@ -27,7 +27,8 @@ class CostEstimate:
         return f"{gib:,.2f} GiB" if gib >= 0.1 else f"{self.bytes_processed / 2**20:,.0f} MiB"
 
     def fmt(self) -> str:
-        return f"{self.size()} scanned (~${self.usd:,.4f})"
+        price = f"~${self.usd:,.4f}" if self.usd >= 0.0001 else "< $0.0001"
+        return f"{self.size()} scanned ({price})"
 
 
 class Engine(ABC):

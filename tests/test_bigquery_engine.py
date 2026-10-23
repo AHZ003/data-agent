@@ -144,3 +144,22 @@ def test_extra_columns_match_needs_every_gold_column():
     assert match_extra_columns([(18,)], [(18, 312_000)], sql)          # hour + its count
     assert not match_extra_columns([(18,)], [(17, 312_000)], sql)
     assert not match_extra_columns([("a", 1), ("b", 2)], [("a", 9)], "SELECT x, y FROM t")
+
+
+def test_bigquery_types_become_plain_pandas_types():
+    """dbdate / Decimal hid a month-by-month trend from the visualizer (QA v6)."""
+    from decimal import Decimal
+    import db_dtypes  # noqa: F401  registers the dbdate dtype
+    from core.bigquery_engine import to_plain_frame
+    from agents.visualizer_agent import get_chart_config
+    df = to_plain_frame(pd.DataFrame({
+        "month": pd.Series([f"2022-{m:02d}-01" for m in range(1, 13)], dtype="dbdate"),
+        "trips": pd.array(range(12), dtype="Int64"),
+        "fare": [Decimal("12.94")] * 12,
+    }))
+    assert pd.api.types.is_datetime64_any_dtype(df["month"]) and df["fare"].dtype == float
+    assert get_chart_config(df[["month", "trips"]], "trips month by month").chart_type.value == "line"
+
+
+def test_tiny_costs_read_as_less_than_a_hundredth_cent():
+    assert estimate(2**20).fmt() == "1 MiB scanned (< $0.0001)"

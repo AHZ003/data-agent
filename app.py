@@ -341,9 +341,22 @@ def _display_frame(df, sql: str = ""):
     return out
 
 
+def _column_formats(df) -> dict:
+    """Thousands separators for numbers; plain dates for midnight timestamps
+    ("2022-01-01", not "2022-01-01 00:00:00")."""
+    fmt = {}
+    for c in df.columns:
+        if pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c]):
+            fmt[c] = st.column_config.NumberColumn(format="localized")
+        elif pd.api.types.is_datetime64_any_dtype(df[c]) and (df[c].dropna().dt.normalize() == df[c].dropna()).all():
+            fmt[c] = st.column_config.DateColumn(format="YYYY-MM-DD")
+    return fmt
+
+
 def _inline_table(df, sql: str = ""):
     if df is not None and 0 < len(df) <= 50:
-        st.dataframe(_display_frame(df, sql), width="stretch", hide_index=True)
+        shown = _display_frame(df, sql)
+        st.dataframe(shown, width="stretch", hide_index=True, column_config=_column_formats(shown))
 
 
 def _render_sql_editor(analysis: dict):
@@ -382,12 +395,23 @@ def _render_cost_confirmation(analysis: dict):
     if st.button("Run it", key=key, type="primary"):
         with st.spinner("Running on BigQuery..."):
             df, err = st.session_state.db.execute_query(analysis["sql_query"], confirm_cost=True)
-        if err:
-            st.error(err)
-            return
-        analysis.update(needs_confirm=False, result_df=df, chart=None, validation=None,
+            if err:
+                st.error(err)
+                return
+            from agents.visualizer_agent import generate_chart
+            question = analysis.get("question", "")
+            try:  # same chart and narrative a normal answer gets
+                chart = generate_chart(df, question)
+                with api_key_override(st.session_state.user_api_key):
+                    story = storyteller_agent.generate_narrative(
+                        question, analysis["sql_query"], storyteller_agent.summarize_result(
+                            df, pii.detect(st.session_state.db.datasource())))
+            except Exception:
+                log.exception("Post-confirmation chart/narrative failed")
+                chart, story = None, ""
+        analysis.update(needs_confirm=False, result_df=df, chart=chart, validation=None,
                         scan=st.session_state.db.last_cost.fmt() if st.session_state.db.last_cost else None,
-                        narrative=f"Ran after your confirmation: {len(df):,} row{'s' if len(df) != 1 else ''}.")
+                        narrative=(story + "\n\n" if story else "") + "_Ran after your confirmation._")
         st.rerun()
 
 
@@ -489,8 +513,8 @@ def render_assistant_body(analysis: dict, should_stream: bool):
             tab_idx = 0
             if "Data" in tab_names:
                 with tabs[tab_idx]:
-                    st.dataframe(_display_frame(analysis["result_df"], analysis.get("sql_query") or ""),
-                                 width="stretch", hide_index=True)
+                    shown = _display_frame(analysis["result_df"], analysis.get("sql_query") or "")
+                    st.dataframe(shown, width="stretch", hide_index=True, column_config=_column_formats(shown))
                 tab_idx += 1
             if "Query" in tab_names:
                 with tabs[tab_idx]:
@@ -751,7 +775,7 @@ else:
         if len(_tables) > 1:
             st.caption("Questions can join across these tables.")
             st.dataframe(
-                pd.DataFrame([{"table": t.name, "rows": f"{t.row_count:,}", "columns": len(t.columns),
+                pd.DataFrame([{"table": t.name.rsplit(".", 1)[-1], "rows": f"{t.row_count:,}", "columns": len(t.columns),
                                "links to": ", ".join(sorted({fk.ref_table for fk in t.foreign_keys}))}
                               for t in _tables]),
                 width="stretch", hide_index=True,
@@ -798,14 +822,21 @@ else:
         )
 
     # --- Starter suggestions ---
-    if not st.session_state.messages and schema.suggested_questions:
-        section_label("Starter questions")
-        st.markdown('<div class="da-suggest-anchor"></div>', unsafe_allow_html=True)
+    def _starter_buttons(prefix: str):
         cols = st.columns(3, gap="medium")
         for i, q in enumerate(schema.suggested_questions[:6]):
-            if cols[i % 3].button(q, key=f"sq_{i}", width="stretch"):
+            if cols[i % 3].button(q, key=f"{prefix}_{i}", width="stretch"):
                 st.session_state["_pending_q"] = q
                 st.rerun()
+
+    if schema.suggested_questions:
+        if not st.session_state.messages:
+            section_label("Starter questions")
+            st.markdown('<div class="da-suggest-anchor"></div>', unsafe_allow_html=True)
+            _starter_buttons("sq")
+        else:  # QA: starters vanished after the first question
+            with st.expander("Starter questions", expanded=False):
+                _starter_buttons("sqx")
 
     # --- Chat history ---
     for idx, msg in enumerate(st.session_state.messages):
