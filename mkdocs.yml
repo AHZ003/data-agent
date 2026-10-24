@@ -1,5 +1,6 @@
 site_name: DataAgent
 site_description: An evaluated, guarded text-to-SQL analytics agent
+site_url: https://ahz003.github.io/data-agent/
 repo_url: https://github.com/AHZ003/data-agent
 edit_uri: edit/main/docs/
 theme:
