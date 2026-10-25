@@ -5,6 +5,8 @@ workspace (CSV/Parquet, SQLite, DuckDB, BigQuery), get the SQL that ran, the
 result, a chart, and a short narrative — through a pipeline whose every change
 is evaluated with confidence intervals and paired significance tests.
 
+[Watch the 3-minute demo](https://youtu.be/QErEOucl78o) or [try the live app](https://dataagent-792621716813.us-central1.run.app).
+
 - **Same code path everywhere.** The Streamlit app, the HTTP API, the CLI, the
   MCP server and every benchmark run `coder_agent.generate_and_execute`.
 - **Guarded execution.** sqlglot AST allow-list, engine-level read-only

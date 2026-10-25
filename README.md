@@ -2,9 +2,9 @@
 
 **A text-to-SQL analytics agent built to be measured.** Ask a question about your data (CSV/Parquet, SQLite, DuckDB, BigQuery); get the SQL that ran, the result, a chart and a short narrative — from a LangGraph pipeline where every change is evaluated with confidence intervals and paired significance tests, every query passes a three-layer guard, and every LLM call is traced with tokens and cost.
 
-**[Live demo](https://dataagent-792621716813.us-central1.run.app)** · [Docs](https://ahz003.github.io/data-agent/) · [Evaluation methodology](benchmarks/README.md) · [System card](docs/system_card.md)
+**[Live demo](https://dataagent-792621716813.us-central1.run.app)** · **[Demo video (3 min)](https://youtu.be/QErEOucl78o)** · [Docs](https://ahz003.github.io/data-agent/) · [Evaluation methodology](benchmarks/README.md) · [System card](docs/system_card.md)
 
-<!-- TODO: demo recording (docs/assets/demo.gif) -->
+[![DataAgent demo video (3 min)](https://img.youtube.com/vi/QErEOucl78o/maxresdefault.jpg)](https://youtu.be/QErEOucl78o)
 
 ![Cost vs accuracy on Spider](docs/pareto_spider.svg)
 
